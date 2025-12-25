@@ -5,6 +5,10 @@ terminal-tunnel
 *.so
 *.dylib
 
+# Build output
+build/
+dist/
+
 # Test binary
 *.test
 
@@ -16,6 +20,9 @@ terminal-tunnel
 .vscode/
 *.swp
 *.swo
+
+# Claude
+.claude/
 
 # OS
 .DS_Store

@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package server provides the terminal tunnel server implementation
 package server
 
