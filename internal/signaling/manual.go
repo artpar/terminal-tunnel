@@ -2,13 +2,14 @@ package signaling
 
 import (
 	"bufio"
+	"bytes"
+	"compress/flate"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/skip2/go-qrcode"
 )
 
@@ -26,15 +27,81 @@ func NewManualSignaling(offer string, salt []byte) *ManualSignaling {
 	}
 }
 
+// StripSDP removes unnecessary lines from SDP to reduce size
+func StripSDP(sdp string) string {
+	var result []string
+	lines := strings.Split(sdp, "\n")
+
+	seenCandidateTypes := make(map[string]bool)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Skip unnecessary lines
+		if strings.HasPrefix(line, "a=extmap") ||
+			strings.HasPrefix(line, "a=rtcp-fb") ||
+			strings.HasPrefix(line, "a=ssrc") ||
+			strings.HasPrefix(line, "a=msid") ||
+			strings.HasPrefix(line, "a=sctpmap") ||
+			strings.HasPrefix(line, "a=rtcp:") ||
+			strings.HasPrefix(line, "a=rtpmap") ||
+			strings.HasPrefix(line, "a=fmtp") ||
+			strings.HasPrefix(line, "a=max-message-size") ||
+			strings.HasPrefix(line, "a=sctp-port") ||
+			strings.HasPrefix(line, "a=end-of-candidates") {
+			continue
+		}
+
+		// Keep only one candidate per type (host, srflx, relay)
+		// Prefer srflx (public IP) over host (private IP)
+		if strings.HasPrefix(line, "a=candidate") {
+			candidateType := "host"
+			if strings.Contains(line, " srflx ") {
+				candidateType = "srflx"
+			} else if strings.Contains(line, " relay ") {
+				candidateType = "relay"
+			}
+
+			// Keep only UDP candidates, skip TCP
+			if strings.Contains(line, " TCP ") || strings.Contains(line, " tcp ") {
+				continue
+			}
+
+			// Skip host candidates if we have srflx (they're redundant for NAT traversal)
+			if candidateType == "host" && seenCandidateTypes["srflx"] {
+				continue
+			}
+
+			if seenCandidateTypes[candidateType] {
+				continue
+			}
+			seenCandidateTypes[candidateType] = true
+		}
+
+		result = append(result, line)
+	}
+
+	return strings.Join(result, "\r\n") + "\r\n"
+}
+
 // CompactOffer creates a compressed, base64-encoded offer for QR/text
-// Format: base64(version[1] + salt[16] + zstd(SDP))
+// Format: base64(version[1] + salt[16] + deflate(SDP))
 func (m *ManualSignaling) CompactOffer() (string, error) {
-	// Compress SDP with zstd
-	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBestCompression))
+	// Strip SDP to reduce size
+	strippedSDP := StripSDP(m.offer)
+
+	// Compress SDP with deflate (compatible with browser's pako)
+	var buf bytes.Buffer
+	writer, err := flate.NewWriter(&buf, flate.BestCompression)
 	if err != nil {
 		return "", fmt.Errorf("failed to create compressor: %w", err)
 	}
-	compressed := encoder.EncodeAll([]byte(m.offer), nil)
+	writer.Write([]byte(strippedSDP))
+	writer.Close()
+	compressed := buf.Bytes()
 
 	// Build compact format: version + salt + compressed_sdp
 	data := make([]byte, 1+SaltSize+len(compressed))
@@ -73,15 +140,12 @@ func DecodeCompactOffer(encoded string) (sdp string, salt []byte, err error) {
 	salt = make([]byte, SaltSize)
 	copy(salt, data[1:1+SaltSize])
 
-	// Decompress SDP
+	// Decompress SDP with deflate
 	compressed := data[1+SaltSize:]
-	decoder, err := zstd.NewReader(nil)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create decompressor: %w", err)
-	}
-	defer decoder.Close()
+	reader := flate.NewReader(bytes.NewReader(compressed))
+	defer reader.Close()
 
-	sdpBytes, err := decoder.DecodeAll(compressed, nil)
+	sdpBytes, err := io.ReadAll(reader)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to decompress: %w", err)
 	}
@@ -90,13 +154,16 @@ func DecodeCompactOffer(encoded string) (sdp string, salt []byte, err error) {
 }
 
 // CompactAnswer creates a compressed, base64-encoded answer
-// Format: base64(version[1] + zstd(SDP)) - no salt needed for answer
+// Format: base64(version[1] + deflate(SDP)) - no salt needed for answer
 func CompactAnswer(answer string) (string, error) {
-	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBestCompression))
+	var buf bytes.Buffer
+	writer, err := flate.NewWriter(&buf, flate.BestCompression)
 	if err != nil {
 		return "", fmt.Errorf("failed to create compressor: %w", err)
 	}
-	compressed := encoder.EncodeAll([]byte(answer), nil)
+	writer.Write([]byte(answer))
+	writer.Close()
+	compressed := buf.Bytes()
 
 	// Build compact format: version + compressed_sdp
 	data := make([]byte, 1+len(compressed))
@@ -126,13 +193,10 @@ func DecodeCompactAnswer(encoded string) (string, error) {
 	}
 
 	compressed := data[1:]
-	decoder, err := zstd.NewReader(nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create decompressor: %w", err)
-	}
-	defer decoder.Close()
+	reader := flate.NewReader(bytes.NewReader(compressed))
+	defer reader.Close()
 
-	sdpBytes, err := decoder.DecodeAll(compressed, nil)
+	sdpBytes, err := io.ReadAll(reader)
 	if err != nil {
 		return "", fmt.Errorf("failed to decompress: %w", err)
 	}
@@ -147,13 +211,22 @@ func (m *ManualSignaling) GenerateQR() (string, error) {
 		return "", err
 	}
 
-	// Generate QR code as string
-	qr, err := qrcode.New(compact, qrcode.Medium)
+	// Use Low error correction for smallest QR size
+	qr, err := qrcode.New(compact, qrcode.Low)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate QR code: %w", err)
 	}
 
 	return qr.ToSmallString(false), nil
+}
+
+// GetCompactOfferSize returns the size of the compact offer in characters
+func (m *ManualSignaling) GetCompactOfferSize() int {
+	compact, err := m.CompactOffer()
+	if err != nil {
+		return 0
+	}
+	return len(compact)
 }
 
 // GenerateQRPNG creates a PNG QR code and writes to the given writer
@@ -174,31 +247,48 @@ func (m *ManualSignaling) GenerateQRPNG(w io.Writer, size int) error {
 
 // PrintInstructions displays user-friendly connection instructions
 func (m *ManualSignaling) PrintInstructions(sessionID, password string) {
+	compact, _ := m.CompactOffer()
+	codeSize := len(compact)
+
 	fmt.Println()
-	fmt.Println("=== Manual Connection Mode ===")
+	fmt.Println("═══════════════════════════════════════════════════")
+	fmt.Println("  Terminal Tunnel - Manual Mode")
+	fmt.Println("═══════════════════════════════════════════════════")
 	fmt.Println()
-	fmt.Println("No direct connectivity available. Use one of these methods:")
-	fmt.Println()
-	fmt.Println("Option 1: Scan QR Code")
-	fmt.Println("   Scan the QR code below with your device's camera")
+	fmt.Printf("  Session ID: %s\n", sessionID)
+	fmt.Printf("  Password:   %s\n", password)
 	fmt.Println()
 
-	qr, err := m.GenerateQR()
-	if err == nil {
-		fmt.Println(qr)
+	// Show QR code only if reasonably small (< 400 chars = ~QR version 12)
+	if codeSize < 400 {
+		fmt.Println("  Scan QR code or copy the code below:")
+		fmt.Println()
+		qr, err := m.GenerateQR()
+		if err == nil {
+			fmt.Println(qr)
+		}
+	} else {
+		fmt.Printf("  Code too large for QR (%d chars). Copy the code below:\n", codeSize)
 	}
 
 	fmt.Println()
-	fmt.Println("Option 2: Copy Connection Code")
-	compact, _ := m.CompactOffer()
-	fmt.Println("   Share this connection code:")
+	fmt.Println("  ─── Connection Code ───")
 	fmt.Println()
-	fmt.Printf("   %s\n", compact)
+
+	// Print code in chunks for readability
+	for i := 0; i < len(compact); i += 70 {
+		end := i + 70
+		if end > len(compact) {
+			end = len(compact)
+		}
+		fmt.Printf("  %s\n", compact[i:end])
+	}
+
 	fmt.Println()
-	fmt.Printf("   Session ID: %s\n", sessionID)
-	fmt.Printf("   Password: %s (share separately!)\n", password)
+	fmt.Println("  ─────────────────────────")
 	fmt.Println()
-	fmt.Println("Waiting for answer...")
+	fmt.Println("  Open terminal-tunnel client and paste this code.")
+	fmt.Println("  Then enter the answer code below:")
 	fmt.Println()
 }
 
