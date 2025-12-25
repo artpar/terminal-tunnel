@@ -2,10 +2,13 @@
 package relayserver
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,10 @@ import (
 
 	"github.com/artpar/terminal-tunnel/internal/signaling"
 )
+
+// Short code alphabet (no ambiguous chars: 0/O, 1/I/l)
+const codeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+const codeLength = 6
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -25,25 +32,66 @@ var upgrader = websocket.Upgrader{
 // Session represents a signaling session between host and client
 type Session struct {
 	ID         string
+	ShortCode  string
 	HostConn   *websocket.Conn
 	ClientConn *websocket.Conn
 	Offer      string
+	Answer     string
 	Salt       string
 	Created    time.Time
+	AnswerChan chan string // Channel to notify host of answer
 	mu         sync.Mutex
+}
+
+// SessionRequest is the request body for creating a session
+type SessionRequest struct {
+	SDP  string `json:"sdp"`
+	Salt string `json:"salt"`
+}
+
+// SessionResponse is the response for session creation
+type SessionResponse struct {
+	Code      string `json:"code"`
+	ExpiresIn int    `json:"expires_in"`
+	URL       string `json:"url,omitempty"`
+}
+
+// SessionInfo is returned when fetching a session
+type SessionInfo struct {
+	SDP  string `json:"sdp"`
+	Salt string `json:"salt"`
+}
+
+// AnswerRequest is the request body for submitting an answer
+type AnswerRequest struct {
+	SDP string `json:"sdp"`
+}
+
+// generateShortCode creates a random short code
+func generateShortCode() string {
+	code := make([]byte, codeLength)
+	alphabetLen := big.NewInt(int64(len(codeAlphabet)))
+	for i := range code {
+		n, _ := rand.Int(rand.Reader, alphabetLen)
+		code[i] = codeAlphabet[n.Int64()]
+	}
+	return string(code)
 }
 
 // RelayServer is a WebSocket relay server for SDP exchange
 type RelayServer struct {
 	sessions   map[string]*Session
+	shortCodes map[string]*Session // maps short code to session
 	mu         sync.RWMutex
 	expiration time.Duration
+	publicURL  string // Public URL for generating client links
 }
 
 // NewRelayServer creates a new relay server
 func NewRelayServer() *RelayServer {
 	rs := &RelayServer{
 		sessions:   make(map[string]*Session),
+		shortCodes: make(map[string]*Session),
 		expiration: 5 * time.Minute,
 	}
 
@@ -51,6 +99,11 @@ func NewRelayServer() *RelayServer {
 	go rs.cleanupLoop()
 
 	return rs
+}
+
+// SetPublicURL sets the public URL for generating client links
+func (rs *RelayServer) SetPublicURL(url string) {
+	rs.publicURL = strings.TrimSuffix(url, "/")
 }
 
 // cleanupLoop periodically removes expired sessions
@@ -70,8 +123,14 @@ func (rs *RelayServer) cleanupLoop() {
 				if session.ClientConn != nil {
 					session.ClientConn.Close()
 				}
+				if session.AnswerChan != nil {
+					close(session.AnswerChan)
+				}
 				session.mu.Unlock()
 				delete(rs.sessions, id)
+				if session.ShortCode != "" {
+					delete(rs.shortCodes, session.ShortCode)
+				}
 				log.Printf("Session %s expired", id)
 			}
 		}
@@ -245,10 +304,246 @@ func (rs *RelayServer) handleDisconnect(sessionID string, conn *websocket.Conn) 
 	conn.Close()
 }
 
+// HandleCreateSession handles POST /session - creates a new session with short code
+func (rs *RelayServer) HandleCreateSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req SessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.SDP == "" {
+		http.Error(w, "SDP required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate unique short code
+	rs.mu.Lock()
+	var code string
+	for {
+		code = generateShortCode()
+		if _, exists := rs.shortCodes[code]; !exists {
+			break
+		}
+	}
+
+	session := &Session{
+		ID:         code,
+		ShortCode:  code,
+		Offer:      req.SDP,
+		Salt:       req.Salt,
+		Created:    time.Now(),
+		AnswerChan: make(chan string, 1),
+	}
+	rs.sessions[code] = session
+	rs.shortCodes[code] = session
+	rs.mu.Unlock()
+
+	log.Printf("Session created with code %s", code)
+
+	// Build response
+	resp := SessionResponse{
+		Code:      code,
+		ExpiresIn: int(rs.expiration.Seconds()),
+	}
+	if rs.publicURL != "" {
+		resp.URL = fmt.Sprintf("%s/?c=%s", rs.publicURL, code)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// HandleGetSession handles GET /session/{code} - retrieves session SDP
+func (rs *RelayServer) HandleGetSession(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract code from path: /session/ABC123
+	path := strings.TrimPrefix(r.URL.Path, "/session/")
+	code := strings.ToUpper(strings.TrimSuffix(path, "/answer"))
+
+	rs.mu.RLock()
+	session, exists := rs.shortCodes[code]
+	rs.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	session.mu.Lock()
+	resp := SessionInfo{
+		SDP:  session.Offer,
+		Salt: session.Salt,
+	}
+	session.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// HandleSubmitAnswer handles POST /session/{code}/answer - submits answer SDP
+func (rs *RelayServer) HandleSubmitAnswer(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract code from path: /session/ABC123/answer
+	path := strings.TrimPrefix(r.URL.Path, "/session/")
+	code := strings.ToUpper(strings.TrimSuffix(path, "/answer"))
+
+	var req AnswerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	rs.mu.RLock()
+	session, exists := rs.shortCodes[code]
+	rs.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	session.mu.Lock()
+	session.Answer = req.SDP
+
+	// Notify via WebSocket if host is connected
+	if session.HostConn != nil {
+		session.HostConn.WriteJSON(signaling.RelayMessage{
+			Type:      signaling.MsgTypeAnswer,
+			SessionID: session.ID,
+			SDP:       req.SDP,
+		})
+	}
+
+	// Also send to answer channel for polling
+	select {
+	case session.AnswerChan <- req.SDP:
+	default:
+	}
+	session.mu.Unlock()
+
+	log.Printf("Answer submitted for session %s", code)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// HandlePollAnswer handles GET /session/{code}/answer - polls for answer (long-polling)
+func (rs *RelayServer) HandlePollAnswer(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract code from path
+	path := strings.TrimPrefix(r.URL.Path, "/session/")
+	code := strings.ToUpper(strings.TrimSuffix(path, "/answer"))
+
+	rs.mu.RLock()
+	session, exists := rs.shortCodes[code]
+	rs.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if answer already exists
+	session.mu.Lock()
+	if session.Answer != "" {
+		answer := session.Answer
+		session.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"sdp": answer})
+		return
+	}
+	answerChan := session.AnswerChan
+	session.mu.Unlock()
+
+	// Long-poll: wait up to 30 seconds for answer
+	select {
+	case answer := <-answerChan:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"sdp": answer})
+	case <-time.After(30 * time.Second):
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "waiting"})
+	case <-r.Context().Done():
+		return
+	}
+}
+
+// sessionHandler routes /session/* requests
+func (rs *RelayServer) sessionHandler(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// POST /session - create new session
+	if path == "/session" || path == "/session/" {
+		rs.HandleCreateSession(w, r)
+		return
+	}
+
+	// /session/{code}/answer
+	if strings.HasSuffix(path, "/answer") {
+		if r.Method == http.MethodPost || r.Method == http.MethodOptions {
+			rs.HandleSubmitAnswer(w, r)
+		} else {
+			rs.HandlePollAnswer(w, r)
+		}
+		return
+	}
+
+	// GET /session/{code}
+	rs.HandleGetSession(w, r)
+}
+
 // Start starts the relay server on the given port
 func (rs *RelayServer) Start(port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", rs.HandleWebSocket)
+	mux.HandleFunc("/session", rs.sessionHandler)
+	mux.HandleFunc("/session/", rs.sessionHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -256,6 +551,12 @@ func (rs *RelayServer) Start(port int) error {
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("Relay server starting on %s", addr)
+	log.Printf("Endpoints:")
+	log.Printf("  POST /session - Create session, get short code")
+	log.Printf("  GET  /session/{code} - Get session SDP")
+	log.Printf("  POST /session/{code}/answer - Submit answer")
+	log.Printf("  GET  /session/{code}/answer - Poll for answer")
+	log.Printf("  WS   /ws?session={code} - WebSocket connection")
 
 	return http.ListenAndServe(addr, mux)
 }

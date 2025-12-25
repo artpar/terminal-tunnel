@@ -11,6 +11,8 @@ const (
 	MethodRelay
 	// MethodManual uses QR code / copy-paste for SDP exchange
 	MethodManual
+	// MethodShortCode uses HTTP API with short codes (default for public relay)
+	MethodShortCode
 )
 
 func (m SignalingMethod) String() string {
@@ -21,10 +23,18 @@ func (m SignalingMethod) String() string {
 		return "WebSocket Relay"
 	case MethodManual:
 		return "Manual (QR/paste)"
+	case MethodShortCode:
+		return "Short Code"
 	default:
 		return "Unknown"
 	}
 }
+
+// DefaultRelayURL is the public relay server
+const DefaultRelayURL = "https://relay.terminal-tunnel.dev"
+
+// DefaultClientURL is the public web client
+const DefaultClientURL = "https://artpar.github.io/terminal-tunnel"
 
 // RelayMessage represents a message in the relay protocol
 type RelayMessage struct {

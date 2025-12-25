@@ -1,0 +1,179 @@
+package signaling
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// ShortCodeClient handles short code based signaling via HTTP
+type ShortCodeClient struct {
+	relayURL  string
+	clientURL string
+	code      string
+	sdp       string
+	salt      string
+	client    *http.Client
+}
+
+// SessionCreateResponse is the response from creating a session
+type SessionCreateResponse struct {
+	Code      string `json:"code"`
+	ExpiresIn int    `json:"expires_in"`
+	URL       string `json:"url,omitempty"`
+}
+
+// SessionGetResponse is the response from getting a session
+type SessionGetResponse struct {
+	SDP  string `json:"sdp"`
+	Salt string `json:"salt"`
+}
+
+// AnswerPollResponse is the response from polling for an answer
+type AnswerPollResponse struct {
+	SDP    string `json:"sdp,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// NewShortCodeClient creates a new short code client
+func NewShortCodeClient(relayURL, clientURL string) *ShortCodeClient {
+	return &ShortCodeClient{
+		relayURL:  strings.TrimSuffix(relayURL, "/"),
+		clientURL: strings.TrimSuffix(clientURL, "/"),
+		client: &http.Client{
+			Timeout: 35 * time.Second, // Slightly longer than long-poll timeout
+		},
+	}
+}
+
+// CreateSession creates a new session and returns a short code
+func (c *ShortCodeClient) CreateSession(sdp, salt string) (string, error) {
+	c.sdp = sdp
+	c.salt = salt
+
+	body, err := json.Marshal(map[string]string{
+		"sdp":  sdp,
+		"salt": salt,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := c.client.Post(c.relayURL+"/session", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create session: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("relay returned error: %s", string(bodyBytes))
+	}
+
+	var result SessionCreateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	c.code = result.Code
+	return result.Code, nil
+}
+
+// GetCode returns the session code
+func (c *ShortCodeClient) GetCode() string {
+	return c.code
+}
+
+// GetClientURL returns the URL for clients to connect
+func (c *ShortCodeClient) GetClientURL() string {
+	if c.clientURL != "" {
+		return fmt.Sprintf("%s/?c=%s", c.clientURL, c.code)
+	}
+	return fmt.Sprintf("%s/?c=%s", DefaultClientURL, c.code)
+}
+
+// WaitForAnswer polls the relay for an answer
+func (c *ShortCodeClient) WaitForAnswer(timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		resp, err := c.client.Get(c.relayURL + "/session/" + c.code + "/answer")
+		if err != nil {
+			// Retry on network errors
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return "", fmt.Errorf("session expired or not found")
+		}
+
+		var result AnswerPollResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		resp.Body.Close()
+
+		if result.SDP != "" {
+			return result.SDP, nil
+		}
+
+		// status == "waiting", continue polling
+		// The long-poll should have already waited, so minimal extra sleep
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return "", fmt.Errorf("timeout waiting for answer")
+}
+
+// GetSession fetches session info by code (for client use)
+func GetSession(relayURL, code string) (*SessionGetResponse, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	resp, err := client.Get(relayURL + "/session/" + strings.ToUpper(code))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("session not found")
+	}
+
+	var result SessionGetResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// SubmitAnswer submits an answer for a session (for client use)
+func SubmitAnswer(relayURL, code, sdp string) error {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	body, err := json.Marshal(map[string]string{"sdp": sdp})
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := client.Post(relayURL+"/session/"+strings.ToUpper(code)+"/answer", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to submit answer: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("relay returned error: %s", string(bodyBytes))
+	}
+
+	return nil
+}

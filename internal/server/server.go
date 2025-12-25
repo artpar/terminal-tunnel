@@ -120,6 +120,8 @@ func (s *Server) Start() error {
 		answer, err = s.startRelaySignaling(offer, saltB64)
 	case signaling.MethodManual:
 		answer, err = s.startManualSignaling(offer)
+	case signaling.MethodShortCode:
+		answer, err = s.startShortCodeSignaling(offer, saltB64)
 	}
 
 	if err != nil {
@@ -230,10 +232,15 @@ func (s *Server) determineSignalingMethod() signaling.SignalingMethod {
 		return signaling.MethodManual
 	}
 
-	// Try UPnP first (will be attempted in startHTTPSignaling)
-	// For now, if relay URL is set and not disabled, prefer relay
+	// If relay URL is set and not disabled, use short code mode (default)
 	if s.opts.RelayURL != "" && !s.opts.NoRelay {
-		return signaling.MethodRelay
+		return signaling.MethodShortCode
+	}
+
+	// If no relay configured but not disabled, use default public relay
+	if !s.opts.NoRelay {
+		s.opts.RelayURL = signaling.DefaultRelayURL
+		return signaling.MethodShortCode
 	}
 
 	// Default to HTTP (with UPnP attempt)
@@ -369,6 +376,52 @@ func (s *Server) startManualSignaling(offer string) (string, error) {
 	answer, err := signaling.ReadAnswer()
 	if err != nil {
 		return "", fmt.Errorf("failed to read answer: %w", err)
+	}
+
+	return answer, nil
+}
+
+// startShortCodeSignaling uses the relay HTTP API with short codes
+func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) {
+	// Create short code client
+	client := signaling.NewShortCodeClient(s.opts.RelayURL, signaling.DefaultClientURL)
+
+	// Create session and get short code
+	code, err := client.CreateSession(offer, saltB64)
+	if err != nil {
+		fmt.Printf("⚠ Failed to create session: %v\n", err)
+		fmt.Printf("Falling back to manual mode...\n")
+		return s.startManualSignaling(offer)
+	}
+
+	clientURL := client.GetClientURL()
+
+	// Display connection info
+	fmt.Printf("\n")
+	fmt.Printf("═══════════════════════════════════════════════════\n")
+	fmt.Printf("  Terminal Tunnel Ready!\n")
+	fmt.Printf("═══════════════════════════════════════════════════\n")
+	fmt.Printf("\n")
+	fmt.Printf("  Code: %s\n", code)
+	fmt.Printf("  Password: %s\n", s.opts.Password)
+	fmt.Printf("\n")
+	fmt.Printf("  Or open: %s\n", clientURL)
+	fmt.Printf("\n")
+
+	// Generate small QR code for the URL (much smaller than full SDP!)
+	qr, err := qrcode.New(clientURL, qrcode.Low)
+	if err == nil {
+		fmt.Print(qr.ToSmallString(false))
+	}
+
+	fmt.Printf("\n")
+	fmt.Printf("  Waiting for connection... (Ctrl+C to cancel)\n")
+	fmt.Printf("\n")
+
+	// Wait for answer via long-polling
+	answer, err := client.WaitForAnswer(s.opts.Timeout)
+	if err != nil {
+		return "", fmt.Errorf("failed to receive answer: %w", err)
 	}
 
 	return answer, nil

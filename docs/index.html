@@ -23,21 +23,25 @@
         }
         .logo { font-size: 48px; margin-bottom: 10px; }
         h1 { color: #e94560; margin-bottom: 20px; font-size: 24px; }
-        .status { color: #888; margin-bottom: 20px; font-size: 14px; }
+        .status { color: #888; margin-bottom: 20px; font-size: 14px; text-align: center; }
         .error { color: #ff6b6b; }
         .success { color: #4ecdc4; }
 
         .form-container {
             background: #16213e; padding: 30px; border-radius: 12px;
-            width: 100%; max-width: 500px;
+            width: 100%; max-width: 400px;
         }
-        .form-container label { color: #888; display: block; margin-bottom: 8px; }
+        .form-container label { color: #888; display: block; margin-bottom: 8px; font-size: 14px; }
         .form-container input, .form-container textarea {
             width: 100%; padding: 12px; border: none; border-radius: 8px;
-            background: #0f3460; color: #fff; font-size: 14px;
+            background: #0f3460; color: #fff; font-size: 16px;
             margin-bottom: 15px; font-family: monospace;
         }
-        .form-container textarea { height: 120px; resize: vertical; }
+        .form-container input.code-input {
+            font-size: 24px; text-align: center; letter-spacing: 4px;
+            text-transform: uppercase;
+        }
+        .form-container textarea { height: 100px; resize: vertical; font-size: 12px; }
         .form-container input:focus, .form-container textarea:focus { outline: 2px solid #e94560; }
         .form-container button {
             width: 100%; padding: 14px; border: none; border-radius: 8px;
@@ -51,18 +55,15 @@
         }
         .form-container button.secondary:hover { background: #1a4a8a; }
 
-        /* Mode tabs */
-        .mode-tabs {
-            display: flex; margin-bottom: 20px;
+        /* Mode toggle */
+        .mode-toggle {
+            text-align: center; margin-top: 15px;
         }
-        .mode-tab {
-            flex: 1; padding: 10px; text-align: center;
-            background: #0f3460; color: #888; cursor: pointer;
-            border: none; font-size: 14px;
+        .mode-toggle a {
+            color: #888; font-size: 12px; cursor: pointer;
+            text-decoration: underline;
         }
-        .mode-tab:first-child { border-radius: 8px 0 0 8px; }
-        .mode-tab:last-child { border-radius: 0 8px 8px 0; }
-        .mode-tab.active { background: #e94560; color: #fff; }
+        .mode-toggle a:hover { color: #e94560; }
 
         /* Answer display */
         .answer-display {
@@ -110,6 +111,18 @@
             <h1>Terminal Tunnel</h1>
             <div id="status" class="status">Initializing...</div>
 
+            <!-- Short code form (default) -->
+            <div id="code-form" class="form-container hidden">
+                <label for="code-input">Enter Session Code</label>
+                <input type="text" id="code-input" class="code-input" placeholder="ABC123" maxlength="8" autocomplete="off">
+                <label for="code-password">Password</label>
+                <input type="password" id="code-password" placeholder="Session password" autocomplete="off">
+                <button id="code-connect-btn">Connect</button>
+                <div class="mode-toggle">
+                    <a id="show-manual-mode">Have a connection code instead?</a>
+                </div>
+            </div>
+
             <!-- Auto/HTTP mode form -->
             <div id="auto-form" class="form-container hidden">
                 <label for="password">Enter Password</label>
@@ -119,18 +132,11 @@
 
             <!-- Manual mode form -->
             <div id="manual-form" class="form-container hidden">
-                <div class="mode-tabs">
-                    <button class="mode-tab active" id="tab-auto">Auto</button>
-                    <button class="mode-tab" id="tab-manual">Manual</button>
-                </div>
-
-                <div id="manual-input-section" class="hidden">
-                    <label for="offer-input">Paste Connection Code</label>
-                    <textarea id="offer-input" placeholder="Paste the connection code from the host terminal..."></textarea>
-                    <label for="manual-password">Password</label>
-                    <input type="password" id="manual-password" placeholder="Session password" autocomplete="off">
-                    <button id="manual-connect-btn">Connect</button>
-                </div>
+                <label for="offer-input">Paste Connection Code</label>
+                <textarea id="offer-input" placeholder="Paste the full connection code from the host terminal..."></textarea>
+                <label for="manual-password">Password</label>
+                <input type="password" id="manual-password" placeholder="Session password" autocomplete="off">
+                <button id="manual-connect-btn">Connect</button>
 
                 <div id="manual-answer-section" class="hidden">
                     <div class="answer-display">
@@ -141,6 +147,10 @@
                     <p style="color: #888; text-align: center; margin-top: 15px; font-size: 12px;">
                         Waiting for host to complete connection...
                     </p>
+                </div>
+
+                <div class="mode-toggle">
+                    <a id="show-code-mode">Have a 6-digit code?</a>
                 </div>
             </div>
 
@@ -172,6 +182,9 @@
     (function() {
         'use strict';
 
+        // Default relay URL (update when public relay is deployed)
+        const DEFAULT_RELAY_URL = 'https://relay.terminal-tunnel.dev';
+
         // State
         let pc = null;
         let dc = null;
@@ -179,30 +192,37 @@
         let fitAddon = null;
         let encryptionKey = null;
         let salt = null;
-        let connectionMode = 'auto'; // auto, relay, manual
+        let connectionMode = 'code'; // code, auto, manual
+        let currentCode = null;
+        let relayUrl = DEFAULT_RELAY_URL;
 
         // DOM elements
         const connectScreen = document.getElementById('connect-screen');
         const terminalScreen = document.getElementById('terminal-screen');
         const statusEl = document.getElementById('status');
         const loadingEl = document.getElementById('loading');
+        const codeForm = document.getElementById('code-form');
         const autoForm = document.getElementById('auto-form');
         const manualForm = document.getElementById('manual-form');
+        const codeInput = document.getElementById('code-input');
+        const codePasswordInput = document.getElementById('code-password');
+        const codeConnectBtn = document.getElementById('code-connect-btn');
         const passwordInput = document.getElementById('password');
         const connectBtn = document.getElementById('connect-btn');
         const terminalContainer = document.getElementById('terminal-container');
         const connectionStatus = document.getElementById('connection-status');
 
         // Manual mode elements
-        const tabAuto = document.getElementById('tab-auto');
-        const tabManual = document.getElementById('tab-manual');
-        const manualInputSection = document.getElementById('manual-input-section');
-        const manualAnswerSection = document.getElementById('manual-answer-section');
         const offerInput = document.getElementById('offer-input');
         const manualPasswordInput = document.getElementById('manual-password');
         const manualConnectBtn = document.getElementById('manual-connect-btn');
+        const manualAnswerSection = document.getElementById('manual-answer-section');
         const answerOutput = document.getElementById('answer-output');
         const copyAnswerBtn = document.getElementById('copy-answer-btn');
+
+        // Mode toggle links
+        const showManualMode = document.getElementById('show-manual-mode');
+        const showCodeMode = document.getElementById('show-code-mode');
 
         // Message types (must match Go protocol)
         const MSG_DATA = 0x01;
@@ -217,38 +237,46 @@
 
         // Initialize
         async function init() {
-            // Check URL params for connection mode
+            // Check URL params
             const params = new URLSearchParams(window.location.search);
-            const relayUrl = params.get('relay');
-            const session = params.get('session');
+            const code = params.get('c') || params.get('code');
             const manualMode = params.get('manual');
+            const customRelay = params.get('relay');
 
+            if (customRelay) {
+                relayUrl = customRelay;
+            }
+
+            // If code is provided in URL, auto-fetch session
+            if (code) {
+                currentCode = code.toUpperCase();
+                codeInput.value = currentCode;
+                loadingEl.classList.add('hidden');
+                codeForm.classList.remove('hidden');
+                codePasswordInput.focus();
+                setStatus(`Session code: ${currentCode}. Enter password to connect.`, 'info');
+                return;
+            }
+
+            // Manual mode
             if (manualMode === 'true' || manualMode === '1') {
-                // Manual mode - show input form
                 connectionMode = 'manual';
                 loadingEl.classList.add('hidden');
                 manualForm.classList.remove('hidden');
-                manualInputSection.classList.remove('hidden');
                 setStatus('Paste the connection code from the host', 'info');
                 return;
             }
 
-            if (relayUrl && session) {
-                // Relay mode
-                connectionMode = 'relay';
-                await initRelay(relayUrl, session);
-                return;
-            }
-
-            // Default: HTTP/auto mode
+            // Default: try to fetch /offer (for direct server mode)
             try {
-                setStatus('Fetching session...', 'info');
+                setStatus('Checking connection...', 'info');
                 const response = await fetch('/offer');
                 const data = await response.json();
 
                 salt = base64ToBytes(data.salt || '');
                 window.sessionOffer = data.offer;
                 window.sessionId = data.sessionId;
+                connectionMode = 'auto';
 
                 setStatus('Enter password to connect', 'info');
                 loadingEl.classList.add('hidden');
@@ -256,59 +284,70 @@
                 passwordInput.focus();
 
             } catch (err) {
-                // Offer endpoint failed - show manual mode option
-                setStatus('Direct connection unavailable. Use manual mode.', 'info');
+                // No direct server - show code form
+                connectionMode = 'code';
                 loadingEl.classList.add('hidden');
-                manualForm.classList.remove('hidden');
-                manualInputSection.classList.remove('hidden');
-                connectionMode = 'manual';
+                codeForm.classList.remove('hidden');
+                codeInput.focus();
+                setStatus('Enter session code and password', 'info');
             }
         }
 
-        // Initialize relay mode
-        async function initRelay(relayUrl, sessionId) {
-            setStatus('Connecting to relay...', 'info');
+        // Fetch session by short code
+        async function fetchSessionByCode(code) {
+            const response = await fetch(`${relayUrl}/session/${code.toUpperCase()}`);
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error('Session not found or expired');
+                }
+                throw new Error('Failed to fetch session');
+            }
+            return await response.json();
+        }
+
+        // Submit answer to relay
+        async function submitAnswerToRelay(code, sdp) {
+            const response = await fetch(`${relayUrl}/session/${code.toUpperCase()}/answer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sdp: sdp })
+            });
+            if (!response.ok) {
+                throw new Error('Failed to submit answer');
+            }
+        }
+
+        // Connect with short code
+        async function connectWithCode() {
+            const code = codeInput.value.trim().toUpperCase();
+            const password = codePasswordInput.value;
+
+            if (!code || code.length < 4) {
+                setStatus('Please enter a valid session code', 'error');
+                return;
+            }
+            if (!password) {
+                setStatus('Please enter a password', 'error');
+                return;
+            }
+
+            codeConnectBtn.disabled = true;
+            currentCode = code;
+            setStatus('Fetching session...', 'info');
 
             try {
-                const ws = new WebSocket(relayUrl + '?session=' + sessionId);
+                const session = await fetchSessionByCode(code);
+                salt = base64ToBytes(session.salt || '');
 
-                ws.onopen = () => {
-                    ws.send(JSON.stringify({
-                        type: 'register',
-                        session_id: sessionId,
-                        role: 'client'
-                    }));
-                };
-
-                ws.onmessage = async (event) => {
-                    const msg = JSON.parse(event.data);
-                    if (msg.type === 'offer') {
-                        salt = base64ToBytes(msg.salt || '');
-                        window.sessionOffer = msg.sdp;
-                        window.sessionId = sessionId;
-                        window.relayWs = ws;
-
-                        setStatus('Enter password to connect', 'info');
-                        loadingEl.classList.add('hidden');
-                        autoForm.classList.remove('hidden');
-                        passwordInput.focus();
-                    } else if (msg.type === 'error') {
-                        setStatus('Relay error: ' + msg.error, 'error');
-                    }
-                };
-
-                ws.onerror = () => {
-                    setStatus('Relay connection failed', 'error');
-                    loadingEl.classList.add('hidden');
-                };
+                await doConnect(password, session.sdp, salt, false, code);
 
             } catch (err) {
-                setStatus('Failed to connect to relay: ' + err.message, 'error');
-                loadingEl.classList.add('hidden');
+                setStatus('Error: ' + err.message, 'error');
+                codeConnectBtn.disabled = false;
             }
         }
 
-        // Connect with password (auto/relay mode)
+        // Connect with password (auto/direct mode)
         async function connect() {
             const password = passwordInput.value;
             if (!password) {
@@ -317,7 +356,7 @@
             }
 
             connectBtn.disabled = true;
-            await doConnect(password, window.sessionOffer, salt);
+            await doConnect(password, window.sessionOffer, salt, false, null);
         }
 
         // Connect in manual mode
@@ -338,12 +377,11 @@
             setStatus('Decoding offer...', 'info');
 
             try {
-                // Decode compact offer
                 const { sdp, decodedSalt } = decodeCompactOffer(compactOffer);
                 salt = decodedSalt;
                 window.sessionOffer = sdp;
 
-                await doConnect(password, sdp, salt, true);
+                await doConnect(password, sdp, salt, true, null);
 
             } catch (err) {
                 setStatus('Failed to decode: ' + err.message, 'error');
@@ -352,7 +390,7 @@
         }
 
         // Common connection logic
-        async function doConnect(password, offer, saltBytes, isManual = false) {
+        async function doConnect(password, offer, saltBytes, isManual, shortCode) {
             try {
                 setStatus('Deriving encryption key...', 'info');
                 encryptionKey = await deriveKey(password, saltBytes);
@@ -376,28 +414,27 @@
                 await pc.setLocalDescription(answer);
                 await waitForICE();
 
+                const answerSDP = pc.localDescription.sdp;
+
                 if (isManual) {
                     // Show answer for user to copy
-                    const compactAnswer = encodeCompactAnswer(pc.localDescription.sdp);
-                    manualInputSection.classList.add('hidden');
+                    const compactAnswer = encodeCompactAnswer(answerSDP);
+                    offerInput.parentElement.classList.add('hidden');
                     manualAnswerSection.classList.remove('hidden');
                     answerOutput.value = compactAnswer;
                     setStatus('Copy the answer code and share with host', 'success');
-                } else if (connectionMode === 'relay' && window.relayWs) {
-                    // Send answer via relay
-                    window.relayWs.send(JSON.stringify({
-                        type: 'answer',
-                        session_id: window.sessionId,
-                        sdp: pc.localDescription.sdp
-                    }));
+                } else if (shortCode) {
+                    // Submit answer via relay
+                    setStatus('Sending answer...', 'info');
+                    await submitAnswerToRelay(shortCode, answerSDP);
                     setStatus('Waiting for connection...', 'success');
                 } else {
-                    // Send answer via HTTP
+                    // Send answer via HTTP (direct mode)
                     setStatus('Sending answer...', 'info');
                     const resp = await fetch('/answer', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ answer: pc.localDescription.sdp })
+                        body: JSON.stringify({ answer: answerSDP })
                     });
                     if (!resp.ok) throw new Error('Failed to send answer');
                     setStatus('Waiting for connection...', 'success');
@@ -405,6 +442,7 @@
 
             } catch (err) {
                 setStatus('Connection failed: ' + err.message, 'error');
+                codeConnectBtn.disabled = false;
                 connectBtn.disabled = false;
                 manualConnectBtn.disabled = false;
             }
@@ -412,10 +450,8 @@
 
         // Decode compact offer (matches Go implementation)
         function decodeCompactOffer(encoded) {
-            // Base64 decode
             let data;
             try {
-                // Try URL-safe base64 first
                 const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
                 const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
                 data = Uint8Array.from(atob(padded), c => c.charCodeAt(0));
@@ -435,7 +471,6 @@
             const decodedSalt = data.slice(1, 1 + SALT_SIZE);
             const compressed = data.slice(1 + SALT_SIZE);
 
-            // Decompress with pako (raw deflate, no zlib header)
             let sdpBytes;
             try {
                 sdpBytes = pako.inflateRaw(compressed);
@@ -458,7 +493,6 @@
             data[0] = COMPACT_VERSION;
             data.set(compressed, 1);
 
-            // URL-safe base64
             const base64 = btoa(String.fromCharCode.apply(null, data));
             return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         }
@@ -508,8 +542,7 @@
                 theme: {
                     background: '#1a1a2e',
                     foreground: '#e0e0e0',
-                    cursor: '#e94560',
-                    cursorAccent: '#1a1a2e'
+                    cursor: '#e94560'
                 }
             });
 
@@ -522,154 +555,175 @@
                 sendMessage(MSG_DATA, new TextEncoder().encode(data));
             });
 
-            const resizeObserver = new ResizeObserver(() => {
-                fitAddon.fit();
-                sendResize();
+            term.onResize(({ rows, cols }) => {
+                const payload = new Uint8Array(4);
+                new DataView(payload.buffer).setUint16(0, rows, false);
+                new DataView(payload.buffer).setUint16(2, cols, false);
+                sendMessage(MSG_RESIZE, payload);
             });
-            resizeObserver.observe(terminalContainer);
 
-            setTimeout(sendResize, 100);
+            window.addEventListener('resize', () => fitAddon.fit());
+
+            // Send initial size
+            setTimeout(() => {
+                const { rows, cols } = term;
+                const payload = new Uint8Array(4);
+                new DataView(payload.buffer).setUint16(0, rows, false);
+                new DataView(payload.buffer).setUint16(2, cols, false);
+                sendMessage(MSG_RESIZE, payload);
+            }, 100);
+
             term.focus();
         }
 
-        function sendResize() {
-            const dims = fitAddon.proposeDimensions();
-            if (!dims) return;
-
-            const payload = new Uint8Array(4);
-            payload[0] = (dims.rows >> 8) & 0xFF;
-            payload[1] = dims.rows & 0xFF;
-            payload[2] = (dims.cols >> 8) & 0xFF;
-            payload[3] = dims.cols & 0xFF;
-
-            sendMessage(MSG_RESIZE, payload);
-        }
-
-        async function sendMessage(type, payload) {
-            if (!dc || dc.readyState !== 'open') return;
-
-            const msg = new Uint8Array(3 + payload.length);
-            msg[0] = type;
-            msg[1] = (payload.length >> 8) & 0xFF;
-            msg[2] = payload.length & 0xFF;
-            msg.set(payload, 3);
-
-            const encrypted = await encrypt(msg);
-            dc.send(encrypted);
-        }
-
-        function parseMessage(data) {
-            return {
-                type: data[0],
-                length: (data[1] << 8) | data[2],
-                payload: data.slice(3)
-            };
-        }
-
-        async function deriveKey(password, salt) {
-            const result = await argon2.hash({
-                pass: password,
-                salt: salt || new Uint8Array(16),
-                time: 3,
-                mem: 65536,
-                parallelism: 4,
-                hashLen: 32,
-                type: argon2.ArgonType.Argon2id
-            });
-            return result.hash;
-        }
-
-        async function encrypt(plaintext) {
-            const nonce = nacl.randomBytes(24);
-            const encrypted = nacl.secretbox(plaintext, nonce, encryptionKey);
-            const result = new Uint8Array(24 + encrypted.length);
-            result.set(nonce);
-            result.set(encrypted, 24);
-            return result;
-        }
-
-        async function decrypt(ciphertext) {
-            const nonce = ciphertext.slice(0, 24);
-            const encrypted = ciphertext.slice(24);
-            const decrypted = nacl.secretbox.open(encrypted, nonce, encryptionKey);
-            if (!decrypted) throw new Error('Decryption failed');
-            return decrypted;
-        }
-
+        // Wait for ICE gathering
         function waitForICE() {
             return new Promise((resolve) => {
                 if (pc.iceGatheringState === 'complete') {
                     resolve();
                     return;
                 }
-                pc.onicegatheringstatechange = () => {
-                    if (pc.iceGatheringState === 'complete') resolve();
+                const check = () => {
+                    if (pc.iceGatheringState === 'complete') {
+                        pc.removeEventListener('icegatheringstatechange', check);
+                        resolve();
+                    }
                 };
-                setTimeout(resolve, 10000);
+                pc.addEventListener('icegatheringstatechange', check);
+                setTimeout(resolve, 3000);
             });
         }
 
-        function setStatus(msg, type) {
-            statusEl.textContent = msg;
-            statusEl.className = 'status ' + (type || '');
+        // Derive encryption key using Argon2
+        async function deriveKey(password, saltBytes) {
+            const result = await argon2.hash({
+                pass: password,
+                salt: saltBytes,
+                time: 3,
+                mem: 65536,
+                parallelism: 4,
+                hashLen: 32,
+                type: argon2.ArgonType.Argon2id
+            });
+            return new Uint8Array(result.hash);
         }
 
-        function base64ToBytes(base64) {
-            if (!base64) return new Uint8Array(16);
-            const binary = atob(base64);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) {
-                bytes[i] = binary.charCodeAt(i);
+        // Encrypt data
+        async function encrypt(data) {
+            const nonce = nacl.randomBytes(24);
+            const encrypted = nacl.secretbox(data, nonce, encryptionKey);
+            const result = new Uint8Array(nonce.length + encrypted.length);
+            result.set(nonce);
+            result.set(encrypted, nonce.length);
+            return result;
+        }
+
+        // Decrypt data
+        async function decrypt(data) {
+            const nonce = data.slice(0, 24);
+            const ciphertext = data.slice(24);
+            const decrypted = nacl.secretbox.open(ciphertext, nonce, encryptionKey);
+            if (!decrypted) throw new Error('Decryption failed');
+            return decrypted;
+        }
+
+        // Parse message
+        function parseMessage(data) {
+            return {
+                type: data[0],
+                payload: data.slice(1)
+            };
+        }
+
+        // Send message
+        async function sendMessage(type, payload) {
+            const msg = new Uint8Array(1 + payload.length);
+            msg[0] = type;
+            msg.set(payload, 1);
+            const encrypted = await encrypt(msg);
+            if (dc && dc.readyState === 'open') {
+                dc.send(encrypted);
             }
-            return bytes;
         }
 
-        // Event handlers
-        connectBtn.onclick = connect;
-        passwordInput.onkeypress = (e) => { if (e.key === 'Enter') connect(); };
+        // Set status message
+        function setStatus(message, type) {
+            statusEl.textContent = message;
+            statusEl.className = 'status';
+            if (type === 'error') statusEl.classList.add('error');
+            if (type === 'success') statusEl.classList.add('success');
+        }
 
-        manualConnectBtn.onclick = manualConnect;
-        manualPasswordInput.onkeypress = (e) => { if (e.key === 'Enter') manualConnect(); };
+        // Helper functions
+        function base64ToBytes(base64) {
+            try {
+                const binary = atob(base64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
+                return bytes;
+            } catch (e) {
+                return new Uint8Array(0);
+            }
+        }
 
-        copyAnswerBtn.onclick = () => {
+        // Event listeners
+        codeConnectBtn.addEventListener('click', connectWithCode);
+        codeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                if (codePasswordInput.value) connectWithCode();
+                else codePasswordInput.focus();
+            }
+        });
+        codePasswordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') connectWithCode();
+        });
+
+        connectBtn.addEventListener('click', connect);
+        passwordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') connect();
+        });
+
+        manualConnectBtn.addEventListener('click', manualConnect);
+        manualPasswordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') manualConnect();
+        });
+
+        copyAnswerBtn.addEventListener('click', () => {
             answerOutput.select();
             document.execCommand('copy');
             copyAnswerBtn.textContent = 'Copied!';
             setTimeout(() => { copyAnswerBtn.textContent = 'Copy to Clipboard'; }, 2000);
-        };
+        });
 
-        // Mode tabs (when in fallback mode)
-        if (tabAuto && tabManual) {
-            tabAuto.onclick = () => {
-                tabAuto.classList.add('active');
-                tabManual.classList.remove('active');
-                manualInputSection.classList.add('hidden');
-                // Try auto mode again
-                init();
-            };
-            tabManual.onclick = () => {
-                tabManual.classList.add('active');
-                tabAuto.classList.remove('active');
-                manualInputSection.classList.remove('hidden');
-                setStatus('Paste the connection code from the host', 'info');
-            };
-        }
+        showManualMode.addEventListener('click', () => {
+            codeForm.classList.add('hidden');
+            manualForm.classList.remove('hidden');
+            connectionMode = 'manual';
+        });
 
-        document.getElementById('fullscreen-btn').onclick = () => {
+        showCodeMode.addEventListener('click', () => {
+            manualForm.classList.add('hidden');
+            codeForm.classList.remove('hidden');
+            connectionMode = 'code';
+        });
+
+        document.getElementById('fullscreen-btn').addEventListener('click', () => {
             if (document.fullscreenElement) {
                 document.exitFullscreen();
             } else {
                 document.documentElement.requestFullscreen();
             }
-        };
+        });
 
-        document.getElementById('disconnect-btn').onclick = () => {
+        document.getElementById('disconnect-btn').addEventListener('click', () => {
             if (dc) dc.close();
             if (pc) pc.close();
             window.location.reload();
-        };
+        });
 
-        // Start
+        // Initialize on load
         init();
     })();
     </script>
