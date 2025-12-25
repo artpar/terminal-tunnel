@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Terminal Tunnel</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            height: 100%;
+            background: #1a1a2e;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+        }
+        #app { height: 100%; display: flex; flex-direction: column; }
+
+        /* Connection screen */
+        #connect-screen {
+            flex: 1; display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            padding: 20px;
+        }
+        .logo { font-size: 48px; margin-bottom: 10px; }
+        h1 { color: #e94560; margin-bottom: 20px; font-size: 24px; }
+        .status { color: #888; margin-bottom: 20px; font-size: 14px; }
+        .error { color: #ff6b6b; }
+        .success { color: #4ecdc4; }
+
+        .password-form {
+            background: #16213e; padding: 30px; border-radius: 12px;
+            width: 100%; max-width: 400px;
+        }
+        .password-form label { color: #888; display: block; margin-bottom: 8px; }
+        .password-form input {
+            width: 100%; padding: 12px; border: none; border-radius: 8px;
+            background: #0f3460; color: #fff; font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .password-form input:focus { outline: 2px solid #e94560; }
+        .password-form button {
+            width: 100%; padding: 14px; border: none; border-radius: 8px;
+            background: #e94560; color: #fff; font-size: 16px;
+            cursor: pointer; font-weight: 600;
+        }
+        .password-form button:disabled { background: #444; cursor: not-allowed; }
+        .password-form button:hover:not(:disabled) { background: #ff6b6b; }
+
+        /* Terminal screen */
+        #terminal-screen { display: none; flex: 1; flex-direction: column; }
+        #terminal-container { flex: 1; padding: 4px; }
+        #terminal-container .xterm { height: 100%; }
+
+        .toolbar {
+            background: #16213e; padding: 8px 12px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .toolbar-left { color: #4ecdc4; font-size: 14px; }
+        .toolbar-right button {
+            background: #0f3460; border: none; color: #888;
+            padding: 6px 12px; border-radius: 4px; cursor: pointer;
+            margin-left: 8px;
+        }
+        .toolbar-right button:hover { background: #e94560; color: #fff; }
+
+        /* Loading spinner */
+        .spinner {
+            border: 3px solid #16213e; border-top: 3px solid #e94560;
+            border-radius: 50%; width: 30px; height: 30px;
+            animation: spin 1s linear infinite; margin: 20px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Connection Screen -->
+        <div id="connect-screen">
+            <div class="logo">🔗</div>
+            <h1>Terminal Tunnel</h1>
+            <div id="status" class="status">Connecting...</div>
+
+            <div id="password-form" class="password-form hidden">
+                <label for="password">Enter Password</label>
+                <input type="password" id="password" placeholder="Session password" autocomplete="off">
+                <button id="connect-btn">Connect</button>
+            </div>
+
+            <div id="loading" class="spinner"></div>
+        </div>
+
+        <!-- Terminal Screen -->
+        <div id="terminal-screen">
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <span id="connection-status">● Connected</span>
+                </div>
+                <div class="toolbar-right">
+                    <button id="fullscreen-btn">⛶</button>
+                    <button id="disconnect-btn">✕</button>
+                </div>
+            </div>
+            <div id="terminal-container"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/argon2-browser@1.18.0/dist/argon2-bundled.min.js"></script>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // State
+        let pc = null;
+        let dc = null;
+        let term = null;
+        let fitAddon = null;
+        let encryptionKey = null;
+        let salt = null;
+
+        // DOM elements
+        const connectScreen = document.getElementById('connect-screen');
+        const terminalScreen = document.getElementById('terminal-screen');
+        const statusEl = document.getElementById('status');
+        const loadingEl = document.getElementById('loading');
+        const passwordForm = document.getElementById('password-form');
+        const passwordInput = document.getElementById('password');
+        const connectBtn = document.getElementById('connect-btn');
+        const terminalContainer = document.getElementById('terminal-container');
+        const connectionStatus = document.getElementById('connection-status');
+
+        // Message types (must match Go protocol)
+        const MSG_DATA = 0x01;
+        const MSG_RESIZE = 0x02;
+        const MSG_PING = 0x03;
+        const MSG_PONG = 0x04;
+        const MSG_CLOSE = 0x05;
+
+        // Initialize
+        async function init() {
+            try {
+                setStatus('Fetching session...', 'info');
+                const response = await fetch('/offer');
+                const data = await response.json();
+
+                salt = base64ToBytes(data.salt || '');
+
+                setStatus('Enter password to connect', 'info');
+                loadingEl.classList.add('hidden');
+                passwordForm.classList.remove('hidden');
+                passwordInput.focus();
+
+                // Store offer for later
+                window.sessionOffer = data.offer;
+                window.sessionId = data.sessionId;
+
+            } catch (err) {
+                setStatus('Failed to load session: ' + err.message, 'error');
+                loadingEl.classList.add('hidden');
+            }
+        }
+
+        // Connect with password
+        async function connect() {
+            const password = passwordInput.value;
+            if (!password) {
+                setStatus('Please enter a password', 'error');
+                return;
+            }
+
+            connectBtn.disabled = true;
+            setStatus('Deriving encryption key...', 'info');
+
+            try {
+                // Derive key from password
+                encryptionKey = await deriveKey(password, salt);
+
+                setStatus('Establishing connection...', 'info');
+
+                // Create WebRTC connection
+                pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                });
+
+                // Handle data channel
+                pc.ondatachannel = (event) => {
+                    dc = event.channel;
+                    setupDataChannel();
+                };
+
+                // Set remote description (offer)
+                await pc.setRemoteDescription({
+                    type: 'offer',
+                    sdp: window.sessionOffer
+                });
+
+                // Create and set answer
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                // Wait for ICE gathering
+                await waitForICE();
+
+                setStatus('Sending answer...', 'info');
+
+                // Send answer to host
+                const resp = await fetch('/answer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ answer: pc.localDescription.sdp })
+                });
+
+                if (!resp.ok) throw new Error('Failed to send answer');
+
+                setStatus('Waiting for connection...', 'success');
+
+            } catch (err) {
+                setStatus('Connection failed: ' + err.message, 'error');
+                connectBtn.disabled = false;
+            }
+        }
+
+        // Setup data channel handlers
+        function setupDataChannel() {
+            dc.binaryType = 'arraybuffer';
+
+            dc.onopen = () => {
+                console.log('Data channel open');
+                showTerminal();
+            };
+
+            dc.onclose = () => {
+                console.log('Data channel closed');
+                connectionStatus.textContent = '● Disconnected';
+                connectionStatus.style.color = '#ff6b6b';
+            };
+
+            dc.onmessage = async (event) => {
+                try {
+                    const decrypted = await decrypt(new Uint8Array(event.data));
+                    const msg = parseMessage(decrypted);
+
+                    if (msg.type === MSG_DATA) {
+                        term.write(new Uint8Array(msg.payload));
+                    } else if (msg.type === MSG_PING) {
+                        sendMessage(MSG_PONG, new Uint8Array(0));
+                    } else if (msg.type === MSG_CLOSE) {
+                        dc.close();
+                    }
+                } catch (err) {
+                    console.error('Decrypt error:', err);
+                }
+            };
+        }
+
+        // Show terminal
+        function showTerminal() {
+            connectScreen.style.display = 'none';
+            terminalScreen.style.display = 'flex';
+
+            term = new Terminal({
+                cursorBlink: true,
+                fontSize: 14,
+                fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                theme: {
+                    background: '#1a1a2e',
+                    foreground: '#e0e0e0',
+                    cursor: '#e94560',
+                    cursorAccent: '#1a1a2e'
+                }
+            });
+
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(terminalContainer);
+            fitAddon.fit();
+
+            // Handle input
+            term.onData((data) => {
+                sendMessage(MSG_DATA, new TextEncoder().encode(data));
+            });
+
+            // Handle resize
+            const resizeObserver = new ResizeObserver(() => {
+                fitAddon.fit();
+                sendResize();
+            });
+            resizeObserver.observe(terminalContainer);
+
+            // Initial resize
+            setTimeout(sendResize, 100);
+            term.focus();
+        }
+
+        // Send resize message
+        function sendResize() {
+            const dims = fitAddon.proposeDimensions();
+            if (!dims) return;
+
+            const payload = new Uint8Array(4);
+            payload[0] = (dims.rows >> 8) & 0xFF;
+            payload[1] = dims.rows & 0xFF;
+            payload[2] = (dims.cols >> 8) & 0xFF;
+            payload[3] = dims.cols & 0xFF;
+
+            sendMessage(MSG_RESIZE, payload);
+        }
+
+        // Send encrypted message
+        async function sendMessage(type, payload) {
+            if (!dc || dc.readyState !== 'open') return;
+
+            // Build message: [type][length 2 bytes][payload]
+            const msg = new Uint8Array(3 + payload.length);
+            msg[0] = type;
+            msg[1] = (payload.length >> 8) & 0xFF;
+            msg[2] = payload.length & 0xFF;
+            msg.set(payload, 3);
+
+            const encrypted = await encrypt(msg);
+            dc.send(encrypted);
+        }
+
+        // Parse message
+        function parseMessage(data) {
+            return {
+                type: data[0],
+                length: (data[1] << 8) | data[2],
+                payload: data.slice(3)
+            };
+        }
+
+        // Encryption helpers
+        async function deriveKey(password, salt) {
+            // Use Argon2id
+            const result = await argon2.hash({
+                pass: password,
+                salt: salt || new Uint8Array(16),
+                time: 3,
+                mem: 65536,
+                parallelism: 4,
+                hashLen: 32,
+                type: argon2.ArgonType.Argon2id
+            });
+            return result.hash;
+        }
+
+        async function encrypt(plaintext) {
+            const nonce = nacl.randomBytes(24);
+            const encrypted = nacl.secretbox(plaintext, nonce, encryptionKey);
+            const result = new Uint8Array(24 + encrypted.length);
+            result.set(nonce);
+            result.set(encrypted, 24);
+            return result;
+        }
+
+        async function decrypt(ciphertext) {
+            const nonce = ciphertext.slice(0, 24);
+            const encrypted = ciphertext.slice(24);
+            const decrypted = nacl.secretbox.open(encrypted, nonce, encryptionKey);
+            if (!decrypted) throw new Error('Decryption failed');
+            return decrypted;
+        }
+
+        // Wait for ICE gathering
+        function waitForICE() {
+            return new Promise((resolve) => {
+                if (pc.iceGatheringState === 'complete') {
+                    resolve();
+                    return;
+                }
+                pc.onicegatheringstatechange = () => {
+                    if (pc.iceGatheringState === 'complete') resolve();
+                };
+                // Timeout after 10 seconds
+                setTimeout(resolve, 10000);
+            });
+        }
+
+        // Helpers
+        function setStatus(msg, type) {
+            statusEl.textContent = msg;
+            statusEl.className = 'status ' + (type || '');
+        }
+
+        function base64ToBytes(base64) {
+            if (!base64) return new Uint8Array(16);
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes;
+        }
+
+        // Event handlers
+        connectBtn.onclick = connect;
+        passwordInput.onkeypress = (e) => { if (e.key === 'Enter') connect(); };
+
+        document.getElementById('fullscreen-btn').onclick = () => {
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            } else {
+                document.documentElement.requestFullscreen();
+            }
+        };
+
+        document.getElementById('disconnect-btn').onclick = () => {
+            if (dc) dc.close();
+            if (pc) pc.close();
+            window.location.reload();
+        };
+
+        // Start
+        init();
+    })();
+    </script>
+</body>
+</html>
