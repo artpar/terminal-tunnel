@@ -37,17 +37,19 @@ func DefaultOptions() Options {
 
 // Server orchestrates the terminal tunnel
 type Server struct {
-	opts         Options
-	peer         *ttwebrtc.Peer
-	signaling    *SignalingServer
-	relayClient  *signaling.RelayClient
-	pty          *PTY
-	bridge       *Bridge
-	channel      *ttwebrtc.EncryptedChannel
-	salt         []byte
-	key          [32]byte
-	sessionID    string
-	upnpClose    func() error
+	opts            Options
+	peer            *ttwebrtc.Peer
+	signaling       *SignalingServer
+	relayClient     *signaling.RelayClient
+	shortCodeClient *signaling.ShortCodeClient
+	pty             *PTY
+	bridge          *Bridge
+	channel         *ttwebrtc.EncryptedChannel
+	salt            []byte
+	key             [32]byte
+	sessionID       string
+	upnpClose       func() error
+	disconnected    chan bool
 }
 
 // NewServer creates a new terminal tunnel server
@@ -80,123 +82,189 @@ func generateSessionID() string {
 
 // Start initializes and runs the terminal tunnel
 func (s *Server) Start() error {
-	// Create WebRTC peer
-	peer, err := ttwebrtc.NewPeer(ttwebrtc.DefaultConfig())
-	if err != nil {
-		return fmt.Errorf("failed to create peer: %w", err)
-	}
-	s.peer = peer
-
-	// Create data channel
-	dc, err := peer.CreateDataChannel("terminal")
-	if err != nil {
-		return fmt.Errorf("failed to create data channel: %w", err)
-	}
-
-	// Create SDP offer
-	offer, err := peer.CreateOffer()
-	if err != nil {
-		return fmt.Errorf("failed to create offer: %w", err)
-	}
-
-	// Get public IP from STUN (for display purposes)
-	publicIP := peer.GetPublicIP()
-	if publicIP != "" {
-		fmt.Printf("✓ Public IP discovered via STUN: %s\n", publicIP)
-	}
-
+	s.disconnected = make(chan bool, 1)
 	saltB64 := base64.StdEncoding.EncodeToString(s.salt)
-
-	// Determine signaling method
-	sigMethod := s.determineSignalingMethod()
-	fmt.Printf("Using signaling method: %s\n", sigMethod)
-
-	var answer string
-
-	switch sigMethod {
-	case signaling.MethodHTTP:
-		answer, err = s.startHTTPSignaling(offer, saltB64)
-	case signaling.MethodRelay:
-		answer, err = s.startRelaySignaling(offer, saltB64)
-	case signaling.MethodManual:
-		answer, err = s.startManualSignaling(offer)
-	case signaling.MethodShortCode:
-		answer, err = s.startShortCodeSignaling(offer, saltB64)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("✓ Received client answer\n")
-
-	// Set remote description
-	if err := peer.SetRemoteDescription(webrtc.SDPTypeAnswer, answer); err != nil {
-		return fmt.Errorf("failed to set answer: %w", err)
-	}
-
-	// Wait for data channel to open
-	dcOpen := make(chan bool)
-	dc.OnOpen(func() {
-		dcOpen <- true
-	})
-
-	select {
-	case <-dcOpen:
-		fmt.Printf("✓ Data channel connected\n")
-	case <-time.After(30 * time.Second):
-		return fmt.Errorf("data channel connection timeout")
-	}
-
-	// Close signaling server - no longer needed
-	if s.signaling != nil {
-		s.signaling.Close()
-	}
-
-	// Start PTY
-	pty, err := StartPTY(s.opts.Shell)
-	if err != nil {
-		return fmt.Errorf("failed to start PTY: %w", err)
-	}
-	s.pty = pty
-
-	fmt.Printf("✓ Terminal session started\n")
-	fmt.Printf("\n")
-
-	// Create encrypted channel
-	channel := ttwebrtc.NewEncryptedChannel(dc, &s.key)
-	s.channel = channel
-
-	// Create bridge
-	bridge := NewBridge(pty, channel.SendData)
-	s.bridge = bridge
-
-	// Handle incoming data
-	channel.OnData(func(data []byte) {
-		bridge.HandleData(data)
-	})
-
-	channel.OnResize(func(rows, cols uint16) {
-		bridge.HandleResize(rows, cols)
-	})
-
-	channel.OnClose(func() {
-		fmt.Printf("\n✓ Client disconnected\n")
-		s.Stop()
-	})
-
-	// Start bridge (PTY -> channel)
-	bridge.Start()
 
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Wait for termination
-	<-sigChan
-	fmt.Printf("\n\nShutting down...\n")
+	// Determine signaling method once
+	sigMethod := s.determineSignalingMethod()
+	fmt.Printf("Using signaling method: %s\n", sigMethod)
 
-	return s.Stop()
+	isFirstConnection := true
+
+	// Connection loop - allows reconnection
+	for {
+		// Create WebRTC peer
+		peer, err := ttwebrtc.NewPeer(ttwebrtc.DefaultConfig())
+		if err != nil {
+			return fmt.Errorf("failed to create peer: %w", err)
+		}
+		s.peer = peer
+
+		// Create data channel
+		dc, err := peer.CreateDataChannel("terminal")
+		if err != nil {
+			return fmt.Errorf("failed to create data channel: %w", err)
+		}
+
+		// Create SDP offer
+		offer, err := peer.CreateOffer()
+		if err != nil {
+			return fmt.Errorf("failed to create offer: %w", err)
+		}
+
+		// Get public IP from STUN (for display purposes) - only on first connection
+		if isFirstConnection {
+			publicIP := peer.GetPublicIP()
+			if publicIP != "" {
+				fmt.Printf("✓ Public IP discovered via STUN: %s\n", publicIP)
+			}
+		}
+
+		var answer string
+
+		if isFirstConnection {
+			// First connection - create new session
+			switch sigMethod {
+			case signaling.MethodHTTP:
+				answer, err = s.startHTTPSignaling(offer, saltB64)
+			case signaling.MethodRelay:
+				answer, err = s.startRelaySignaling(offer, saltB64)
+			case signaling.MethodManual:
+				answer, err = s.startManualSignaling(offer)
+			case signaling.MethodShortCode:
+				answer, err = s.startShortCodeSignaling(offer, saltB64)
+			}
+		} else {
+			// Reconnection - update existing session
+			if sigMethod == signaling.MethodShortCode && s.shortCodeClient != nil {
+				fmt.Printf("\n  Waiting for reconnection... (same code: %s)\n\n", s.shortCodeClient.GetCode())
+				err = s.shortCodeClient.UpdateSession(offer, saltB64)
+				if err != nil {
+					fmt.Printf("⚠ Failed to update session: %v\n", err)
+					return err
+				}
+				answer, err = s.shortCodeClient.WaitForAnswer(s.opts.Timeout)
+			} else {
+				// For other methods, fall back to creating new session
+				switch sigMethod {
+				case signaling.MethodHTTP:
+					answer, err = s.startHTTPSignaling(offer, saltB64)
+				case signaling.MethodRelay:
+					answer, err = s.startRelaySignaling(offer, saltB64)
+				case signaling.MethodManual:
+					answer, err = s.startManualSignaling(offer)
+				}
+			}
+		}
+
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("✓ Received client answer\n")
+
+		// Set remote description
+		if err := peer.SetRemoteDescription(webrtc.SDPTypeAnswer, answer); err != nil {
+			return fmt.Errorf("failed to set answer: %w", err)
+		}
+
+		// Wait for data channel to open
+		dcOpen := make(chan bool, 1)
+		dc.OnOpen(func() {
+			dcOpen <- true
+		})
+
+		select {
+		case <-dcOpen:
+			fmt.Printf("✓ Data channel connected\n")
+		case <-time.After(30 * time.Second):
+			peer.Close()
+			fmt.Printf("⚠ Connection timeout, waiting for new client...\n")
+			continue
+		case <-sigChan:
+			fmt.Printf("\n\nShutting down...\n")
+			return s.Stop()
+		}
+
+		// Close signaling server - no longer needed
+		if s.signaling != nil {
+			s.signaling.Close()
+			s.signaling = nil
+		}
+
+		// Start PTY only on first connection
+		if s.pty == nil {
+			pty, err := StartPTY(s.opts.Shell)
+			if err != nil {
+				return fmt.Errorf("failed to start PTY: %w", err)
+			}
+			s.pty = pty
+		}
+
+		fmt.Printf("✓ Terminal session active\n")
+		fmt.Printf("\n")
+
+		// Create encrypted channel
+		channel := ttwebrtc.NewEncryptedChannel(dc, &s.key)
+		s.channel = channel
+
+		// Create bridge
+		bridge := NewBridge(s.pty, channel.SendData)
+		s.bridge = bridge
+
+		// Handle incoming data
+		channel.OnData(func(data []byte) {
+			bridge.HandleData(data)
+		})
+
+		channel.OnResize(func(rows, cols uint16) {
+			bridge.HandleResize(rows, cols)
+		})
+
+		channel.OnClose(func() {
+			fmt.Printf("\n✓ Client disconnected\n")
+			select {
+			case s.disconnected <- true:
+			default:
+			}
+		})
+
+		// Start bridge (PTY -> channel)
+		bridge.Start()
+
+		isFirstConnection = false
+
+		// Wait for disconnection or termination
+		select {
+		case <-s.disconnected:
+			// Client disconnected, clean up and wait for reconnection
+			s.cleanupConnection()
+			continue
+		case <-sigChan:
+			fmt.Printf("\n\nShutting down...\n")
+			return s.Stop()
+		}
+	}
+}
+
+// cleanupConnection cleans up the current connection for reconnection
+func (s *Server) cleanupConnection() {
+	if s.bridge != nil {
+		s.bridge.Close()
+		s.bridge = nil
+	}
+	if s.channel != nil {
+		s.channel.Close()
+		s.channel = nil
+	}
+	if s.peer != nil {
+		s.peer.Close()
+		s.peer = nil
+	}
 }
 
 // Stop gracefully shuts down the server
@@ -383,8 +451,9 @@ func (s *Server) startManualSignaling(offer string) (string, error) {
 
 // startShortCodeSignaling uses the relay HTTP API with short codes
 func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) {
-	// Create short code client
+	// Create short code client and save for reconnection
 	client := signaling.NewShortCodeClient(s.opts.RelayURL, signaling.DefaultClientURL)
+	s.shortCodeClient = client
 
 	// Create session and get short code
 	code, err := client.CreateSession(offer, saltB64)

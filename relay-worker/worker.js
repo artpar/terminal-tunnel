@@ -203,6 +203,30 @@ export default {
       });
     }
 
+    // PUT /session/{code} - update session (for reconnection)
+    const updateMatch = path.match(/^\/session\/([A-Z0-9]+)$/i);
+    if (updateMatch && request.method === 'PUT') {
+      const code = updateMatch[1].toUpperCase();
+      const { sdp, salt } = await request.json();
+
+      const existing = await env.SESSIONS.get(code);
+      if (!existing) {
+        return new Response(JSON.stringify({ error: 'Session not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Update session with new offer, clear answer
+      await env.SESSIONS.put(code, JSON.stringify({ sdp, salt, answer: null }), {
+        expirationTtl: EXPIRY_SECONDS
+      });
+
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // POST /session/{code}/answer - submit answer
     const answerPostMatch = path.match(/^\/session\/([A-Z0-9]+)\/answer$/i);
     if (answerPostMatch && request.method === 'POST') {

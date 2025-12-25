@@ -337,13 +337,6 @@
 
             try {
                 const session = await fetchSessionByCode(code);
-
-                if (session.used) {
-                    setStatus('Session already used - ask host to restart terminal-tunnel', 'error');
-                    codeConnectBtn.disabled = false;
-                    return;
-                }
-
                 salt = base64ToBytes(session.salt || '');
                 await doConnect(password, session.sdp, salt, false, code);
 

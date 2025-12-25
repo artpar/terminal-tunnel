@@ -96,6 +96,39 @@ func (c *ShortCodeClient) GetClientURL() string {
 	return fmt.Sprintf("%s/?c=%s", DefaultClientURL, c.code)
 }
 
+// UpdateSession updates an existing session with a new offer (for reconnection)
+func (c *ShortCodeClient) UpdateSession(sdp, salt string) error {
+	c.sdp = sdp
+	c.salt = salt
+
+	body, err := json.Marshal(map[string]string{
+		"sdp":  sdp,
+		"salt": salt,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPut, c.relayURL+"/session/"+c.code, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to update session: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("relay returned error: %s", string(bodyBytes))
+	}
+
+	return nil
+}
+
 // WaitForAnswer polls the relay for an answer
 func (c *ShortCodeClient) WaitForAnswer(timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
