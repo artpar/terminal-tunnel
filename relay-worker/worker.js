@@ -54,9 +54,9 @@ const landingPage = `<!DOCTYPE html>
     }
     pre {
       background: #0f3460; padding: 15px; border-radius: 8px;
-      overflow-x: auto; margin: 15px 0;
+      overflow-x: auto; margin: 15px 0; max-width: 100%;
     }
-    pre code { background: none; padding: 0; }
+    pre code { background: none; padding: 0; word-break: break-all; white-space: pre-wrap; font-size: 13px; }
 
     .steps { counter-reset: step; }
     .step {
@@ -69,9 +69,10 @@ const landingPage = `<!DOCTYPE html>
       border-radius: 50%; display: flex; align-items: center;
       justify-content: center; font-weight: bold; flex-shrink: 0;
     }
-    .step-content { flex: 1; }
+    .step-content { flex: 1; min-width: 0; overflow: hidden; }
     .step-content h3 { margin-bottom: 8px; }
     .step-content p { color: #888; }
+    .step-content pre { margin: 10px 0 0 0; }
 
     .features { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
     .feature { background: #0f3460; padding: 15px; border-radius: 8px; text-align: center; }
