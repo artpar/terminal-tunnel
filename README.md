@@ -1,30 +1,40 @@
 # Terminal Tunnel
 
-P2P terminal sharing with end-to-end encryption. Access your terminal from any device, including Android.
+P2P terminal sharing with end-to-end encryption. Share your terminal from anywhere - no signup, no relay servers, just direct encrypted connections.
 
 ## Features
 
-- **One command startup** - Single command generates a shareable link
-- **Fully P2P** - No third-party relay servers, direct WebRTC connection
+- **Zero setup** - Single binary, no dependencies
+- **Fully P2P** - Direct WebRTC connection, your data never touches third-party servers
 - **E2E encrypted** - Password-derived keys using Argon2id + NaCl SecretBox
-- **Cross-platform** - Works on Linux, macOS, Windows (WSL), FreeBSD
+- **Cross-NAT** - Works across different networks with multiple fallback modes
 - **Mobile friendly** - Access from any device with a modern browser
-- **NAT traversal** - Automatic UPnP port forwarding with manual fallback
+- **Web client** - Use the hosted client at [artpar.github.io/terminal-tunnel](https://artpar.github.io/terminal-tunnel/)
+
+## Quick Start
+
+```bash
+# Start sharing your terminal
+./terminal-tunnel serve -p mysecretpassword
+
+# Output:
+# Share this link: http://203.0.113.5:54321
+# Password: mysecretpassword
+```
+
+Open the link in any browser, enter the password, and you're connected!
 
 ## Installation
 
 ### From Releases
 
-Download the latest binary for your platform from [Releases](https://github.com/artpar/terminal-tunnel/releases).
+Download from [Releases](https://github.com/artpar/terminal-tunnel/releases):
 
 ```bash
 # Linux/macOS
 tar -xzf terminal-tunnel-*.tar.gz
 chmod +x terminal-tunnel
 sudo mv terminal-tunnel /usr/local/bin/
-
-# Or run directly
-./terminal-tunnel serve --password mysecret
 ```
 
 ### From Source
@@ -33,85 +43,114 @@ sudo mv terminal-tunnel /usr/local/bin/
 go install github.com/artpar/terminal-tunnel/cmd/terminal-tunnel@latest
 ```
 
-Or clone and build:
+## Connection Modes
+
+Terminal Tunnel automatically selects the best connection method:
+
+### 1. Direct Mode (Default)
+
+Works when your network allows incoming connections (UPnP enabled or port forwarded):
 
 ```bash
-git clone https://github.com/artpar/terminal-tunnel.git
-cd terminal-tunnel
-make build
+./terminal-tunnel serve -p mypassword
 ```
 
-## Usage
+### 2. Relay Mode
 
-### Start a terminal session
+Use a self-hosted relay server for signaling (data still flows P2P):
 
 ```bash
-terminal-tunnel serve --password mysecret
+# On your server - start the relay
+./terminal-tunnel relay --port 8765
+
+# On your machine - use the relay
+./terminal-tunnel serve -p mypassword --relay ws://your-server:8765
 ```
 
-Output:
-```
-Terminal Tunnel Server
-======================
-Share this link: http://203.0.113.5:54321
-Password: mysecret (share separately!)
+### 3. Manual Mode
 
-Waiting for connection...
+Works everywhere - exchange codes manually via any channel (email, chat, etc):
+
+```bash
+./terminal-tunnel serve -p mypassword --manual
 ```
 
-### Connect from another device
+Then:
+1. Copy the connection code displayed
+2. Open [artpar.github.io/terminal-tunnel](https://artpar.github.io/terminal-tunnel/)
+3. Paste the code and enter password
+4. Copy the answer code back to terminal
 
-1. Open the link in a browser (Chrome, Firefox, Safari)
-2. Enter the password
-3. Terminal appears - you're connected!
+## Web Client
 
-### Options
+The web client is hosted at **https://artpar.github.io/terminal-tunnel/**
+
+It works in three modes:
+- **Auto** - When opened from a direct link
+- **Relay** - When connecting via a relay server
+- **Manual** - Paste connection codes for pure P2P
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  HOST                                                            │
+│  ./terminal-tunnel serve -p secret                               │
+├──────────────────────────────────────────────────────────────────┤
+│  1. Start PTY (bash/zsh)                                         │
+│  2. Create WebRTC offer with ICE candidates                      │
+│  3. Share offer via HTTP / Relay / Manual                        │
+│  4. Receive answer, establish P2P DataChannel                    │
+│  5. Bridge: PTY ↔ Encrypted DataChannel                          │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                    WebRTC P2P (DTLS + E2E)
+                              │
+┌──────────────────────────────────────────────────────────────────┐
+│  CLIENT (Browser)                                                │
+│  https://artpar.github.io/terminal-tunnel/                       │
+├──────────────────────────────────────────────────────────────────┤
+│  1. Load xterm.js terminal emulator                              │
+│  2. Receive offer, prompt for password                           │
+│  3. Derive encryption key (Argon2id)                             │
+│  4. Create answer, complete WebRTC handshake                     │
+│  5. Bridge: xterm.js ↔ Encrypted DataChannel                     │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+## Command Reference
+
+### `serve` - Share your terminal
 
 ```bash
 terminal-tunnel serve [flags]
 
 Flags:
   -p, --password string   Password for E2E encryption (required)
-  -s, --shell string      Shell to use (default: $SHELL or /bin/sh)
-      --port int          HTTP port for signaling (default: random)
-  -h, --help              Help for serve
+  -s, --shell string      Shell to use (default: $SHELL)
+  -t, --timeout duration  Connection timeout (default: 5m)
+      --relay string      WebSocket relay URL for signaling
+      --no-relay          Disable relay, use manual if UPnP fails
+      --manual            Force manual mode (QR/copy-paste)
 ```
 
-## How It Works
+### `relay` - Run a signaling relay
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  HOST: terminal-tunnel serve --password secret                  │
-├─────────────────────────────────────────────────────────────────┤
-│  1. Start PTY (bash/zsh)                                        │
-│  2. Create WebRTC offer                                         │
-│  3. Start HTTP server for signaling                             │
-│  4. Display shareable link                                      │
-│  5. Wait for client answer                                      │
-│  6. Establish P2P DataChannel                                   │
-│  7. Bridge: PTY ↔ Encrypted DataChannel                         │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                    WebRTC P2P (DTLS + E2E)
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│  CLIENT: Browser opens link                                     │
-├─────────────────────────────────────────────────────────────────┤
-│  1. Load xterm.js terminal                                      │
-│  2. Prompt for password                                         │
-│  3. Derive encryption key (Argon2id)                            │
-│  4. Complete WebRTC handshake                                   │
-│  5. Establish P2P DataChannel                                   │
-│  6. Bridge: xterm.js ↔ Encrypted DataChannel                    │
-└─────────────────────────────────────────────────────────────────┘
+```bash
+terminal-tunnel relay [flags]
+
+Flags:
+      --port int   Port for relay server (default: 8765)
 ```
 
 ## Security
 
-### Encryption Layers
+### Encryption
 
-1. **Transport**: WebRTC DTLS (mandatory, handles key exchange)
-2. **Application**: NaCl SecretBox on top of DTLS for E2E encryption
+| Layer | Protection |
+|-------|------------|
+| Transport | WebRTC DTLS (mandatory) |
+| Application | NaCl SecretBox (E2E on top of DTLS) |
 
 ### Key Derivation
 
@@ -119,59 +158,47 @@ Flags:
 Argon2id(password, salt, time=3, memory=64MB, threads=4) → 256-bit key
 ```
 
-- Salt is random 16 bytes, generated per session
-- Key never transmitted - derived independently on both sides
+- Random 16-byte salt per session
+- Key derived independently on both ends
+- Password never transmitted
 
 ### What's Protected
 
-- All terminal I/O is encrypted end-to-end
-- Password never sent over the network
-- Even if DTLS were compromised, data remains encrypted
+- All terminal I/O encrypted end-to-end
+- Even if DTLS compromised, data remains encrypted
+- Relay server (if used) only sees encrypted signaling data
 
 ## NAT Traversal
 
-The tool uses multiple strategies to work across networks:
-
-1. **STUN** - Discovers public IP via Google's STUN servers
-2. **UPnP/NAT-PMP** - Attempts automatic port forwarding
-3. **WebRTC ICE** - Hole-punching for most NAT types
+| Method | When Used |
+|--------|-----------|
+| STUN | Discovers public IP |
+| UPnP/NAT-PMP | Automatic port forwarding |
+| WebRTC ICE | Hole-punching for most NATs |
+| Relay | Signaling only, data stays P2P |
+| Manual | Works through any NAT |
 
 ### Limitations
 
-- **Symmetric NAT on both sides**: Won't work (no TURN relay)
-- **Strict firewalls**: May block UDP traffic
-- **Carrier-grade NAT (CGNAT)**: UPnP won't help, but WebRTC may still work
-
-### Fallback
-
-If the link isn't reachable, the tool displays a QR code and offer text for manual exchange.
+- **Symmetric NAT on both sides**: Use relay or manual mode
+- **Strict firewalls**: May block UDP, use manual mode
+- **No TURN**: No data relay, keeps it truly P2P
 
 ## Platform Support
 
 | Platform | Status |
 |----------|--------|
-| Linux amd64 | Full support |
-| Linux arm64 | Full support |
-| Linux armv7 | Full support |
-| macOS amd64 | Full support |
-| macOS arm64 | Full support |
-| Windows amd64 | Requires WSL |
-| Windows arm64 | Requires WSL |
+| Linux amd64/arm64/armv7 | Full support |
+| macOS amd64/arm64 | Full support |
 | FreeBSD amd64 | Full support |
-
-Windows note: Native PTY not supported. Run inside WSL for full functionality.
+| Windows amd64/arm64 | Requires WSL |
 
 ## Building
 
 ```bash
-# Build for current platform
-make build
-
-# Build for all platforms
-make build-all
-
-# Create release archives
-make release
+make build          # Current platform
+make build-all      # All platforms
+make release        # Create archives
 ```
 
 ## License
@@ -180,7 +207,7 @@ MIT
 
 ## Acknowledgments
 
-- [Pion WebRTC](https://github.com/pion/webrtc) - Pure Go WebRTC implementation
+- [Pion WebRTC](https://github.com/pion/webrtc) - Pure Go WebRTC
 - [creack/pty](https://github.com/creack/pty) - PTY handling
-- [xterm.js](https://xtermjs.org/) - Terminal emulator for the browser
+- [xterm.js](https://xtermjs.org/) - Browser terminal
 - [Argon2](https://github.com/P-H-C/phc-winner-argon2) - Password hashing
