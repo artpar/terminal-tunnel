@@ -509,12 +509,10 @@
             dc.binaryType = 'arraybuffer';
 
             dc.onopen = () => {
-                console.log('Data channel open');
                 showTerminal();
             };
 
             dc.onclose = () => {
-                console.log('Data channel closed');
                 connectionStatus.textContent = '● Disconnected';
                 connectionStatus.style.color = '#ff6b6b';
             };
@@ -532,7 +530,7 @@
                         dc.close();
                     }
                 } catch (err) {
-                    console.error('Decrypt error:', err);
+                    // Decryption failed - ignore
                 }
             };
         }
@@ -559,7 +557,6 @@
             fitAddon.fit();
 
             term.onData((data) => {
-                console.log('Terminal input:', data, 'DC state:', dc ? dc.readyState : 'no dc');
                 sendMessage(MSG_DATA, new TextEncoder().encode(data));
             });
 
@@ -652,19 +649,12 @@
         async function sendMessage(type, payload) {
             const msg = new Uint8Array(3 + payload.length);
             msg[0] = type;
-            msg[1] = (payload.length >> 8) & 0xff; // length high byte
-            msg[2] = payload.length & 0xff;        // length low byte
+            msg[1] = (payload.length >> 8) & 0xff;
+            msg[2] = payload.length & 0xff;
             msg.set(payload, 3);
-            try {
-                const encrypted = await encrypt(msg);
-                if (dc && dc.readyState === 'open') {
-                    dc.send(encrypted);
-                    console.log('Sent message type:', type, 'size:', encrypted.length);
-                } else {
-                    console.warn('Cannot send - dc:', dc, 'state:', dc ? dc.readyState : 'none');
-                }
-            } catch (err) {
-                console.error('Send error:', err);
+            const encrypted = await encrypt(msg);
+            if (dc && dc.readyState === 'open') {
+                dc.send(encrypted);
             }
         }
 
