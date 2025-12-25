@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/artpar/terminal-tunnel/internal/server"
+	"github.com/artpar/terminal-tunnel/internal/signaling/relayserver"
 )
 
 var (
@@ -52,18 +53,50 @@ The server will:
 	RunE: runServe,
 }
 
+var relayCmd = &cobra.Command{
+	Use:   "relay",
+	Short: "Start a signaling relay server",
+	Long: `Start a WebSocket relay server for SDP exchange.
+
+This allows terminal-tunnel hosts and clients on different networks
+to exchange connection information without direct connectivity.
+
+The relay only handles SDP signaling (~2KB per connection).
+All terminal traffic goes directly peer-to-peer after connection.
+
+Example:
+  terminal-tunnel relay --port 8765
+
+Clients connect using:
+  terminal-tunnel serve --password secret --relay ws://your-relay:8765`,
+	RunE: runRelay,
+}
+
+var relayPort int
+
 var (
 	password string
 	shell    string
 	timeout  time.Duration
+	relayURL string
+	noRelay  bool
+	manual   bool
 )
 
 func init() {
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(relayCmd)
 
+	// Serve command flags
 	serveCmd.Flags().StringVarP(&password, "password", "p", "", "Session password (auto-generated if not provided)")
 	serveCmd.Flags().StringVarP(&shell, "shell", "s", "", "Shell to run (default: $SHELL or /bin/sh)")
 	serveCmd.Flags().DurationVarP(&timeout, "timeout", "t", 5*time.Minute, "Timeout waiting for client connection")
+	serveCmd.Flags().StringVar(&relayURL, "relay", "", "WebSocket relay URL for signaling (e.g., ws://relay.example.com:8765)")
+	serveCmd.Flags().BoolVar(&noRelay, "no-relay", false, "Disable relay signaling, use manual mode if UPnP fails")
+	serveCmd.Flags().BoolVar(&manual, "manual", false, "Force manual (QR/copy-paste) signaling mode")
+
+	// Relay command flags
+	relayCmd.Flags().IntVar(&relayPort, "port", 8765, "Port to listen on for WebSocket connections")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -77,6 +110,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Password: password,
 		Shell:    shell,
 		Timeout:  timeout,
+		RelayURL: relayURL,
+		NoRelay:  noRelay,
+		Manual:   manual,
 	}
 
 	srv, err := server.NewServer(opts)
@@ -92,4 +128,15 @@ func generatePassword() string {
 	b := make([]byte, 12)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func runRelay(cmd *cobra.Command, args []string) error {
+	fmt.Printf("Starting relay server on port %d...\n", relayPort)
+	fmt.Printf("\n")
+	fmt.Printf("Hosts can connect using:\n")
+	fmt.Printf("  terminal-tunnel serve -p <password> --relay ws://<your-ip>:%d\n", relayPort)
+	fmt.Printf("\n")
+
+	rs := relayserver.NewRelayServer()
+	return rs.Start(relayPort)
 }

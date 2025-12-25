@@ -3,6 +3,8 @@ package webrtc
 
 import (
 	"fmt"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,14 +166,66 @@ func (p *Peer) waitForICEGathering() error {
 }
 
 // GetPublicIP attempts to get the public IP from gathered ICE candidates
+// by parsing server-reflexive (srflx) candidates from the SDP
 func (p *Peer) GetPublicIP() string {
 	if p.pc.LocalDescription() == nil {
 		return ""
 	}
 
-	// Parse SDP to find server reflexive candidates
-	// This is a simplified approach - in production you might parse more carefully
-	return "" // Will be populated by STUN response
+	sdp := p.pc.LocalDescription().SDP
+
+	// Parse SDP lines looking for srflx candidates
+	// Example: a=candidate:... typ srflx ... raddr 192.168.1.100 rport 12345
+	lines := strings.Split(sdp, "\n")
+	for _, line := range lines {
+		if !strings.Contains(line, "candidate") {
+			continue
+		}
+		if !strings.Contains(line, "srflx") {
+			continue
+		}
+
+		// Parse the candidate line to extract IP
+		// Format: a=candidate:<foundation> <component> <protocol> <priority> <ip> <port> typ srflx ...
+		parts := strings.Fields(line)
+		for i, part := range parts {
+			if part == "srflx" && i >= 2 {
+				// The IP should be a few fields before "typ srflx"
+				// Standard format puts IP at position 4 (0-indexed)
+				for j := 4; j < len(parts) && j < i; j++ {
+					if ip := net.ParseIP(parts[j]); ip != nil {
+						if isPublicIP(ip) {
+							return ip.String()
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+// isPublicIP checks if an IP address is publicly routable
+func isPublicIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+
+	// Check if it's a private/local address
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return false
+	}
+
+	// IPv4 specific checks
+	if ip4 := ip.To4(); ip4 != nil {
+		// Check for CGNAT range (100.64.0.0/10)
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+			return false
+		}
+	}
+
+	return true
 }
 
 // OnConnectionStateChange sets a callback for connection state changes
