@@ -194,7 +194,11 @@ export default {
       }
 
       const session = JSON.parse(data);
-      return new Response(JSON.stringify({ sdp: session.sdp, salt: session.salt }), {
+      return new Response(JSON.stringify({
+        sdp: session.sdp,
+        salt: session.salt,
+        used: session.answer !== null
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }

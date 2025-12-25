@@ -337,8 +337,14 @@
 
             try {
                 const session = await fetchSessionByCode(code);
-                salt = base64ToBytes(session.salt || '');
 
+                if (session.used) {
+                    setStatus('Session already used - ask host to restart terminal-tunnel', 'error');
+                    codeConnectBtn.disabled = false;
+                    return;
+                }
+
+                salt = base64ToBytes(session.salt || '');
                 await doConnect(password, session.sdp, salt, false, code);
 
             } catch (err) {
@@ -428,6 +434,14 @@
                     setStatus('Sending answer...', 'info');
                     await submitAnswerToRelay(shortCode, answerSDP);
                     setStatus('Waiting for connection...', 'success');
+
+                    // Timeout if connection doesn't establish
+                    setTimeout(() => {
+                        if (!dc || dc.readyState !== 'open') {
+                            setStatus('Connection timeout - host may have disconnected. Ask host to restart.', 'error');
+                            codeConnectBtn.disabled = false;
+                        }
+                    }, 15000);
                 } else {
                     // Send answer via HTTP (direct mode)
                     setStatus('Sending answer...', 'info');
