@@ -2,6 +2,7 @@ package signaling
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -129,16 +130,39 @@ func (c *ShortCodeClient) UpdateSession(sdp, salt string) error {
 	return nil
 }
 
-// WaitForAnswer polls the relay for an answer
+// WaitForAnswer polls the relay for an answer with context support
 func (c *ShortCodeClient) WaitForAnswer(timeout time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return c.WaitForAnswerWithContext(ctx)
+}
 
-	for time.Now().Before(deadline) {
-		resp, err := c.client.Get(c.relayURL + "/session/" + c.code + "/answer")
+// WaitForAnswerWithContext polls the relay for an answer with cancellation support
+func (c *ShortCodeClient) WaitForAnswerWithContext(ctx context.Context) (string, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.relayURL+"/session/"+c.code+"/answer", nil)
 		if err != nil {
+			return "", fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
 			// Retry on network errors
-			time.Sleep(1 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(1 * time.Second):
+				continue
+			}
 		}
 
 		if resp.StatusCode == http.StatusNotFound {
@@ -149,8 +173,12 @@ func (c *ShortCodeClient) WaitForAnswer(timeout time.Duration) (string, error) {
 		var result AnswerPollResponse
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			resp.Body.Close()
-			time.Sleep(1 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(1 * time.Second):
+				continue
+			}
 		}
 		resp.Body.Close()
 
@@ -159,11 +187,12 @@ func (c *ShortCodeClient) WaitForAnswer(timeout time.Duration) (string, error) {
 		}
 
 		// status == "waiting", continue polling
-		// The long-poll should have already waited, so minimal extra sleep
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-
-	return "", fmt.Errorf("timeout waiting for answer")
 }
 
 // GetSession fetches session info by code (for client use)

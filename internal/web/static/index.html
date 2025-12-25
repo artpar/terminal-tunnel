@@ -77,8 +77,22 @@
 
         /* Terminal screen */
         #terminal-screen { display: none; flex: 1; flex-direction: column; }
-        #terminal-container { flex: 1; padding: 4px; }
+        #terminal-container { flex: 1; padding: 4px; position: relative; }
         #terminal-container .xterm { height: 100%; }
+
+        /* Mobile keyboard helper - invisible input that triggers keyboard */
+        #mobile-input {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0;
+            font-size: 16px; /* Prevents zoom on iOS */
+            z-index: 10;
+            pointer-events: none;
+        }
+        #mobile-input.active {
+            pointer-events: auto;
+        }
 
         .toolbar {
             background: #16213e; padding: 8px 12px;
@@ -168,7 +182,9 @@
                     <button id="disconnect-btn">✕</button>
                 </div>
             </div>
-            <div id="terminal-container"></div>
+            <div id="terminal-container">
+                <input type="text" id="mobile-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text">
+            </div>
         </div>
     </div>
 
@@ -535,14 +551,24 @@
             };
         }
 
+        // Detect mobile device
+        function isMobile() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                   ('ontouchstart' in window) ||
+                   (navigator.maxTouchPoints > 0);
+        }
+
         // Show terminal
         function showTerminal() {
             connectScreen.style.display = 'none';
             terminalScreen.style.display = 'flex';
 
+            const mobileInput = document.getElementById('mobile-input');
+            const mobile = isMobile();
+
             term = new Terminal({
                 cursorBlink: true,
-                fontSize: 14,
+                fontSize: mobile ? 12 : 14,
                 fontFamily: 'Menlo, Monaco, "Courier New", monospace',
                 theme: {
                     background: '#1a1a2e',
@@ -560,8 +586,60 @@
                 sendMessage(MSG_DATA, new TextEncoder().encode(data));
             });
 
-            // Click to focus
-            terminalContainer.addEventListener('click', () => term.focus());
+            if (mobile) {
+                // Mobile: use hidden input to capture keyboard
+                mobileInput.classList.add('active');
+
+                // Forward input to terminal
+                mobileInput.addEventListener('input', (e) => {
+                    const data = e.target.value;
+                    if (data) {
+                        sendMessage(MSG_DATA, new TextEncoder().encode(data));
+                        e.target.value = '';
+                    }
+                });
+
+                // Handle special keys
+                mobileInput.addEventListener('keydown', (e) => {
+                    let data = null;
+                    switch (e.key) {
+                        case 'Enter': data = '\r'; break;
+                        case 'Backspace': data = '\x7f'; break;
+                        case 'Tab': data = '\t'; e.preventDefault(); break;
+                        case 'Escape': data = '\x1b'; break;
+                        case 'ArrowUp': data = '\x1b[A'; break;
+                        case 'ArrowDown': data = '\x1b[B'; break;
+                        case 'ArrowRight': data = '\x1b[C'; break;
+                        case 'ArrowLeft': data = '\x1b[D'; break;
+                    }
+                    if (data) {
+                        sendMessage(MSG_DATA, new TextEncoder().encode(data));
+                        e.preventDefault();
+                    }
+                });
+
+                // Touch to focus and show keyboard
+                terminalContainer.addEventListener('touchstart', (e) => {
+                    mobileInput.focus();
+                    // Prevent double-tap zoom
+                    if (e.touches.length === 1) {
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+
+                // Also handle click for hybrid devices
+                terminalContainer.addEventListener('click', () => {
+                    mobileInput.focus();
+                });
+
+                // Focus mobile input initially
+                setTimeout(() => mobileInput.focus(), 100);
+
+            } else {
+                // Desktop: use xterm's built-in keyboard handling
+                terminalContainer.addEventListener('click', () => term.focus());
+                term.focus();
+            }
 
             term.onResize(({ rows, cols }) => {
                 const payload = new Uint8Array(4);
@@ -580,8 +658,6 @@
                 new DataView(payload.buffer).setUint16(2, cols, false);
                 sendMessage(MSG_RESIZE, payload);
             }, 100);
-
-            term.focus();
         }
 
         // Wait for ICE gathering

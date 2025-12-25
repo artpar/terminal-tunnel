@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -50,6 +51,8 @@ type Server struct {
 	sessionID       string
 	upnpClose       func() error
 	disconnected    chan bool
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 // NewServer creates a new terminal tunnel server
@@ -85,9 +88,19 @@ func (s *Server) Start() error {
 	s.disconnected = make(chan bool, 1)
 	saltB64 := base64.StdEncoding.EncodeToString(s.salt)
 
+	// Create cancellable context for graceful shutdown
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Cancel context on signal (allows blocking operations to exit)
+	go func() {
+		<-sigChan
+		fmt.Printf("\n\nShutting down...\n")
+		s.cancel()
+	}()
 
 	// Determine signaling method once
 	sigMethod := s.determineSignalingMethod()
@@ -147,7 +160,13 @@ func (s *Server) Start() error {
 					fmt.Printf("⚠ Failed to update session: %v\n", err)
 					return err
 				}
-				answer, err = s.shortCodeClient.WaitForAnswer(s.opts.Timeout)
+				// Use context for cancellation support
+				ctx, cancel := context.WithTimeout(s.ctx, s.opts.Timeout)
+				answer, err = s.shortCodeClient.WaitForAnswerWithContext(ctx)
+				cancel()
+				if err != nil && s.ctx.Err() != nil {
+					return s.Stop()
+				}
 			} else {
 				// For other methods, fall back to creating new session
 				switch sigMethod {
@@ -162,6 +181,9 @@ func (s *Server) Start() error {
 		}
 
 		if err != nil {
+			if s.ctx.Err() != nil {
+				return s.Stop()
+			}
 			return err
 		}
 
@@ -185,8 +207,7 @@ func (s *Server) Start() error {
 			peer.Close()
 			fmt.Printf("⚠ Connection timeout, waiting for new client...\n")
 			continue
-		case <-sigChan:
-			fmt.Printf("\n\nShutting down...\n")
+		case <-s.ctx.Done():
 			return s.Stop()
 		}
 
@@ -244,8 +265,7 @@ func (s *Server) Start() error {
 			// Client disconnected, clean up and wait for reconnection
 			s.cleanupConnection()
 			continue
-		case <-sigChan:
-			fmt.Printf("\n\nShutting down...\n")
+		case <-s.ctx.Done():
 			return s.Stop()
 		}
 	}
@@ -487,9 +507,14 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 	fmt.Printf("  Waiting for connection... (Ctrl+C to cancel)\n")
 	fmt.Printf("\n")
 
-	// Wait for answer via long-polling
-	answer, err := client.WaitForAnswer(s.opts.Timeout)
+	// Wait for answer via long-polling with context for cancellation
+	ctx, cancel := context.WithTimeout(s.ctx, s.opts.Timeout)
+	defer cancel()
+	answer, err := client.WaitForAnswerWithContext(ctx)
 	if err != nil {
+		if s.ctx.Err() != nil {
+			return "", s.ctx.Err()
+		}
 		return "", fmt.Errorf("failed to receive answer: %w", err)
 	}
 
