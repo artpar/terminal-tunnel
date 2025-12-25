@@ -30,8 +30,8 @@ func (m SignalingMethod) String() string {
 	}
 }
 
-// DefaultRelayURL is the public relay server
-const DefaultRelayURL = "https://relay.terminal-tunnel.dev"
+// DefaultRelayURL is the public relay server (Cloudflare Worker)
+const DefaultRelayURL = "https://terminal-tunnel-relay.artpar.workers.dev"
 
 // DefaultClientURL is the public web client
 const DefaultClientURL = "https://artpar.github.io/terminal-tunnel"
