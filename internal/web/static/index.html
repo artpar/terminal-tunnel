@@ -552,8 +552,12 @@
             fitAddon.fit();
 
             term.onData((data) => {
+                console.log('Terminal input:', data, 'DC state:', dc ? dc.readyState : 'no dc');
                 sendMessage(MSG_DATA, new TextEncoder().encode(data));
             });
+
+            // Click to focus
+            terminalContainer.addEventListener('click', () => term.focus());
 
             term.onResize(({ rows, cols }) => {
                 const payload = new Uint8Array(4);
@@ -640,9 +644,16 @@
             const msg = new Uint8Array(1 + payload.length);
             msg[0] = type;
             msg.set(payload, 1);
-            const encrypted = await encrypt(msg);
-            if (dc && dc.readyState === 'open') {
-                dc.send(encrypted);
+            try {
+                const encrypted = await encrypt(msg);
+                if (dc && dc.readyState === 'open') {
+                    dc.send(encrypted);
+                    console.log('Sent message type:', type, 'size:', encrypted.length);
+                } else {
+                    console.warn('Cannot send - dc:', dc, 'state:', dc ? dc.readyState : 'none');
+                }
+            } catch (err) {
+                console.error('Send error:', err);
             }
         }
 
