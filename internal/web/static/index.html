@@ -638,19 +638,23 @@
             return decrypted;
         }
 
-        // Parse message
+        // Parse message - format: [type: 1 byte][length: 2 bytes big-endian][payload]
         function parseMessage(data) {
+            const type = data[0];
+            const length = (data[1] << 8) | data[2];
             return {
-                type: data[0],
-                payload: data.slice(1)
+                type: type,
+                payload: data.slice(3, 3 + length)
             };
         }
 
-        // Send message
+        // Send message - format: [type: 1 byte][length: 2 bytes big-endian][payload]
         async function sendMessage(type, payload) {
-            const msg = new Uint8Array(1 + payload.length);
+            const msg = new Uint8Array(3 + payload.length);
             msg[0] = type;
-            msg.set(payload, 1);
+            msg[1] = (payload.length >> 8) & 0xff; // length high byte
+            msg[2] = payload.length & 0xff;        // length low byte
+            msg.set(payload, 3);
             try {
                 const encrypted = await encrypt(msg);
                 if (dc && dc.readyState === 'open') {
