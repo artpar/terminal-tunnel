@@ -3,11 +3,19 @@ package webrtc
 import (
 	"io"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 
 	"github.com/artpar/terminal-tunnel/internal/crypto"
 	"github.com/artpar/terminal-tunnel/internal/protocol"
+)
+
+const (
+	// PingInterval is how often the server sends pings to the client
+	PingInterval = 10 * time.Second
+	// PongTimeout is how long to wait for a pong before considering connection dead
+	PongTimeout = 30 * time.Second
 )
 
 // EncryptedChannel wraps a WebRTC DataChannel with encryption and protocol handling
@@ -21,13 +29,19 @@ type EncryptedChannel struct {
 
 	mu     sync.Mutex
 	closed bool
+
+	// Keepalive tracking
+	lastPongTime  time.Time
+	pingTicker    *time.Ticker
+	pongCheckDone chan struct{}
 }
 
 // NewEncryptedChannel creates an encrypted wrapper for a DataChannel
 func NewEncryptedChannel(dc *webrtc.DataChannel, key *[32]byte) *EncryptedChannel {
 	ec := &EncryptedChannel{
-		dc:  dc,
-		key: key,
+		dc:           dc,
+		key:          key,
+		lastPongTime: time.Now(), // Initialize to now, assume connection is fresh
 	}
 
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -39,6 +53,7 @@ func NewEncryptedChannel(dc *webrtc.DataChannel, key *[32]byte) *EncryptedChanne
 		ec.closed = true
 		handler := ec.onClose
 		ec.mu.Unlock()
+		ec.StopKeepalive() // Stop keepalive when channel closes
 		if handler != nil {
 			handler()
 		}
@@ -77,6 +92,11 @@ func (ec *EncryptedChannel) handleMessage(data []byte) {
 	case protocol.MsgPing:
 		// Respond with pong
 		ec.sendMessage(protocol.NewPongMessage())
+	case protocol.MsgPong:
+		// Update last pong time for keepalive tracking
+		ec.mu.Lock()
+		ec.lastPongTime = time.Now()
+		ec.mu.Unlock()
 	case protocol.MsgClose:
 		ec.Close()
 	}
@@ -159,4 +179,82 @@ func (ec *EncryptedChannel) Ready() bool {
 // Label returns the data channel label
 func (ec *EncryptedChannel) Label() string {
 	return ec.dc.Label()
+}
+
+// StartKeepalive begins sending pings and monitoring for pong timeouts
+// Returns a channel that will receive true if the connection times out
+func (ec *EncryptedChannel) StartKeepalive() <-chan struct{} {
+	ec.mu.Lock()
+	if ec.pingTicker != nil {
+		ec.mu.Unlock()
+		return ec.pongCheckDone
+	}
+
+	ec.pingTicker = time.NewTicker(PingInterval)
+	ec.pongCheckDone = make(chan struct{})
+	ec.lastPongTime = time.Now()
+	ec.mu.Unlock()
+
+	timeoutChan := make(chan struct{})
+
+	go func() {
+		defer close(timeoutChan)
+		for {
+			select {
+			case <-ec.pongCheckDone:
+				return
+			case <-ec.pingTicker.C:
+				// Send ping
+				ec.mu.Lock()
+				closed := ec.closed
+				ec.mu.Unlock()
+
+				if closed {
+					return
+				}
+
+				if err := ec.sendMessage(protocol.NewPingMessage()); err != nil {
+					// Send failed, connection likely dead
+					return
+				}
+
+				// Check if we've received a pong recently
+				ec.mu.Lock()
+				lastPong := ec.lastPongTime
+				ec.mu.Unlock()
+
+				if time.Since(lastPong) > PongTimeout {
+					// Connection timed out - no pong received
+					return
+				}
+			}
+		}
+	}()
+
+	return timeoutChan
+}
+
+// StopKeepalive stops the ping/pong keepalive mechanism
+func (ec *EncryptedChannel) StopKeepalive() {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+
+	if ec.pingTicker != nil {
+		ec.pingTicker.Stop()
+		ec.pingTicker = nil
+	}
+	if ec.pongCheckDone != nil {
+		select {
+		case <-ec.pongCheckDone:
+			// Already closed
+		default:
+			close(ec.pongCheckDone)
+		}
+		ec.pongCheckDone = nil
+	}
+}
+
+// SendPing sends a ping message (used by client-side keepalive)
+func (ec *EncryptedChannel) SendPing() error {
+	return ec.sendMessage(protocol.NewPingMessage())
 }

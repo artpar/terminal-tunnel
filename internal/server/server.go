@@ -117,6 +117,24 @@ func (s *Server) Start() error {
 		}
 		s.peer = peer
 
+		// Monitor connection state for debugging and early disconnect detection
+		peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+			switch state {
+			case webrtc.PeerConnectionStateConnected:
+				// Connection established
+			case webrtc.PeerConnectionStateDisconnected:
+				fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
+			case webrtc.PeerConnectionStateFailed:
+				fmt.Printf("\n✗ WebRTC connection failed\n")
+				select {
+				case s.disconnected <- true:
+				default:
+				}
+			case webrtc.PeerConnectionStateClosed:
+				// Connection closed intentionally
+			}
+		})
+
 		// Create data channel
 		dc, err := peer.CreateDataChannel("terminal")
 		if err != nil {
@@ -257,12 +275,20 @@ func (s *Server) Start() error {
 		// Start bridge (PTY -> channel)
 		bridge.Start()
 
+		// Start keepalive monitoring (server sends pings, expects pongs)
+		keepaliveTimeout := channel.StartKeepalive()
+
 		isFirstConnection = false
 
-		// Wait for disconnection or termination
+		// Wait for disconnection, keepalive timeout, or termination
 		select {
 		case <-s.disconnected:
 			// Client disconnected, clean up and wait for reconnection
+			s.cleanupConnection()
+			continue
+		case <-keepaliveTimeout:
+			// Keepalive timed out - no pong received within timeout
+			fmt.Printf("\n⚠ Connection timed out (no response from client)\n")
 			s.cleanupConnection()
 			continue
 		case <-s.ctx.Done():
@@ -279,6 +305,7 @@ func (s *Server) cleanupConnection() {
 		s.bridge = nil
 	}
 	if s.channel != nil {
+		s.channel.StopKeepalive() // Stop keepalive before closing
 		s.channel.Close()
 		s.channel = nil
 	}

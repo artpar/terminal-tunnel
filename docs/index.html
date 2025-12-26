@@ -387,7 +387,11 @@
                 this.terminalScreen = null;
                 this.latency = null;
                 this.lastPingTime = null;
+                this.lastPongTime = null;
                 this.pingInterval = null;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
+                this.password = null; // Stored for auto-reconnect only
             }
 
             destroy() {
@@ -396,6 +400,7 @@
                 if (this.pc) this.pc.close();
                 if (this.term) this.term.dispose();
                 if (this.container) this.container.remove();
+                this.password = null; // Clear password on destroy
             }
         }
 
@@ -777,6 +782,7 @@
 
             session.code = code;
             session.name = name || code;
+            session.password = password; // Store for auto-reconnect
             session.status = 'connecting';
             connectBtn.disabled = true;
             spinner.classList.remove('hidden');
@@ -824,8 +830,10 @@
             };
 
             session.pc.onconnectionstatechange = () => {
-                if (session.pc.connectionState === 'disconnected' || session.pc.connectionState === 'failed') {
-                    handleDisconnect(session);
+                const state = session.pc.connectionState;
+                console.log('Connection state:', state);
+                if (state === 'disconnected' || state === 'failed') {
+                    handleDisconnect(session, true); // Auto-reconnect on ICE failure
                 }
             };
 
@@ -878,6 +886,7 @@
                     } else if (msg.type === MSG_PING) {
                         sendMessage(session, MSG_PONG, new Uint8Array(0));
                     } else if (msg.type === MSG_PONG) {
+                        session.lastPongTime = Date.now();
                         if (session.lastPingTime) {
                             session.latency = Date.now() - session.lastPingTime;
                             manager.updateUI();
@@ -889,22 +898,90 @@
             };
         }
 
-        function handleDisconnect(session) {
+        function handleDisconnect(session, autoReconnect = false) {
+            if (session.status === 'disconnected') return; // Already disconnected
             session.status = 'disconnected';
             if (session.pingInterval) {
                 clearInterval(session.pingInterval);
                 session.pingInterval = null;
             }
             manager.updateUI();
+            if (autoReconnect) {
+                attemptAutoReconnect(session);
+            }
         }
 
+        const PONG_TIMEOUT = 15000; // 15 seconds without pong = connection dead
+        const RECONNECT_BASE_DELAY = 1000; // Start with 1 second
+        const RECONNECT_MAX_DELAY = 30000; // Max 30 seconds
+
         function startPingInterval(session) {
+            session.lastPongTime = Date.now(); // Initialize to now
             session.pingInterval = setInterval(() => {
                 if (session.dc && session.dc.readyState === 'open') {
+                    // Check for pong timeout
+                    if (session.lastPongTime && (Date.now() - session.lastPongTime) > PONG_TIMEOUT) {
+                        console.log('Connection timed out - no pong received');
+                        handleDisconnect(session, true); // Auto-reconnect on timeout
+                        return;
+                    }
                     session.lastPingTime = Date.now();
                     sendMessage(session, MSG_PING, new Uint8Array(0));
                 }
             }, 5000);
+        }
+
+        function attemptAutoReconnect(session) {
+            if (!session.code || !session.password) return; // Can't reconnect without credentials
+            if (session.reconnectAttempts >= session.maxReconnectAttempts) {
+                console.log('Max reconnect attempts reached');
+                session.reconnectAttempts = 0;
+                return;
+            }
+
+            session.reconnectAttempts++;
+            const delay = Math.min(
+                RECONNECT_BASE_DELAY * Math.pow(2, session.reconnectAttempts - 1),
+                RECONNECT_MAX_DELAY
+            );
+
+            console.log(`Auto-reconnecting in ${delay}ms (attempt ${session.reconnectAttempts}/${session.maxReconnectAttempts})`);
+
+            setTimeout(async () => {
+                if (session.status === 'disconnected' && session.code) {
+                    session.status = 'connecting';
+                    manager.updateUI();
+
+                    // Clean up old connection
+                    if (session.dc) { try { session.dc.close(); } catch(e) {} session.dc = null; }
+                    if (session.pc) { try { session.pc.close(); } catch(e) {} session.pc = null; }
+
+                    try {
+                        // Fetch session from relay
+                        const response = await fetch(`${session.relayUrl}/session/${session.code}`);
+                        if (!response.ok) {
+                            throw new Error(response.status === 404 ? 'Session expired' : 'Failed to fetch session');
+                        }
+                        const data = await response.json();
+                        session.salt = base64ToBytes(data.salt || '');
+
+                        // Re-derive key if salt changed, otherwise reuse
+                        if (!session.encryptionKey) {
+                            session.encryptionKey = await deriveKey(session.password, session.salt);
+                        }
+
+                        // Establish connection
+                        await establishConnection(session, data.sdp, session.code);
+                        session.reconnectAttempts = 0; // Reset on success
+                        console.log('Reconnected successfully');
+                    } catch (err) {
+                        console.log('Reconnect failed:', err.message);
+                        session.status = 'disconnected';
+                        manager.updateUI();
+                        attemptAutoReconnect(session); // Try again
+                    }
+                }
+            }, delay);
         }
 
         // ============== Terminal ==============
