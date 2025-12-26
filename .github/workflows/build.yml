@@ -139,29 +139,34 @@ jobs:
 
             binary_name=$(basename "$binary")
 
-            # Create archive with version in name
-            archive_base="${{ env.BINARY_NAME }}-${VERSION}-${name#${{ env.BINARY_NAME }}-}"
+            # Extract platform info (e.g., linux-amd64, darwin-arm64)
+            platform="${name#${{ env.BINARY_NAME }}-}"
+
+            # Create versioned archive name
+            archive_base_versioned="${{ env.BINARY_NAME }}-${VERSION}-${platform}"
+            # Create non-versioned archive name (for latest download)
+            archive_base_latest="${{ env.BINARY_NAME }}-${platform}"
 
             if [[ "$name" == *"windows"* ]]; then
               # For Windows, create zip
-              archive_name="${archive_base}.zip"
               cd "$dir"
-              # Rename binary to just 'tt.exe' inside archive
               cp "$binary_name" "${{ env.BINARY_NAME }}.exe"
-              zip -r "../../release/${archive_name}" "${{ env.BINARY_NAME }}.exe"
+              zip -r "../../release/${archive_base_versioned}.zip" "${{ env.BINARY_NAME }}.exe"
+              zip -r "../../release/${archive_base_latest}.zip" "${{ env.BINARY_NAME }}.exe"
               cd ../..
+              echo "Created: release/${archive_base_versioned}.zip"
+              echo "Created: release/${archive_base_latest}.zip"
             else
               # For Unix, create tar.gz
-              archive_name="${archive_base}.tar.gz"
               cd "$dir"
-              # Rename binary to just 'tt' inside archive
               cp "$binary_name" "${{ env.BINARY_NAME }}"
               chmod +x "${{ env.BINARY_NAME }}"
-              tar -czf "../../release/${archive_name}" "${{ env.BINARY_NAME }}"
+              tar -czf "../../release/${archive_base_versioned}.tar.gz" "${{ env.BINARY_NAME }}"
+              tar -czf "../../release/${archive_base_latest}.tar.gz" "${{ env.BINARY_NAME }}"
               cd ../..
+              echo "Created: release/${archive_base_versioned}.tar.gz"
+              echo "Created: release/${archive_base_latest}.tar.gz"
             fi
-
-            echo "Created: release/${archive_name}"
           done
 
           # Generate checksums
