@@ -19,12 +19,14 @@ func StartPTY(shell string) (*PTY, error) {
 	return nil, ErrWindowsNotSupported
 }
 
-func (p *PTY) Read(buf []byte) (int, error)  { return 0, ErrWindowsNotSupported }
+func (p *PTY) Read(buf []byte) (int, error)   { return 0, ErrWindowsNotSupported }
 func (p *PTY) Write(data []byte) (int, error) { return 0, ErrWindowsNotSupported }
 func (p *PTY) Resize(rows, cols uint16) error { return ErrWindowsNotSupported }
 func (p *PTY) Close() error                   { return nil }
 func (p *PTY) Wait() error                    { return ErrWindowsNotSupported }
 func (p *PTY) Fd() uintptr                    { return 0 }
+func (p *PTY) Name() string                   { return "" }
+func (p *PTY) PID() int                       { return 0 }
 
 // Bridge connects the PTY to a data channel (stub for Windows)
 type Bridge struct {
