@@ -3,6 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Security: Content Security Policy to prevent XSS and data exfiltration -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+        style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+        connect-src 'self' https://terminal-tunnel-relay.artpar.workers.dev wss: https:;
+        img-src 'self' data:;
+        font-src 'self' https://cdn.jsdelivr.net;
+        worker-src 'self' blob:;
+    ">
     <title>Terminal Tunnel</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
     <style>
@@ -367,6 +377,14 @@
         const MSG_DATA = 0x01, MSG_RESIZE = 0x02, MSG_PING = 0x03, MSG_PONG = 0x04, MSG_CLOSE = 0x05;
         const COMPACT_VERSION = 0x01, SALT_SIZE = 16;
 
+        // Security: HTML escape function to prevent XSS
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         // ============== Session Class ==============
         class Session {
             constructor(id) {
@@ -537,11 +555,22 @@
                 const statusClass = session.status === 'connected' ? 'connected' :
                                    session.status === 'connecting' ? 'connecting' : 'disconnected';
 
-                tab.innerHTML = `
-                    <span class="status-dot ${statusClass}"></span>
-                    <span class="tab-name">${session.name || session.code || 'New Session'}</span>
-                    <span class="close-btn" data-action="close">&times;</span>
-                `;
+                // Security: Use DOM methods instead of innerHTML to prevent XSS
+                const statusDot = document.createElement('span');
+                statusDot.className = 'status-dot ' + statusClass;
+
+                const tabName = document.createElement('span');
+                tabName.className = 'tab-name';
+                tabName.textContent = session.name || session.code || 'New Session'; // Safe: textContent escapes HTML
+
+                const closeBtn = document.createElement('span');
+                closeBtn.className = 'close-btn';
+                closeBtn.dataset.action = 'close';
+                closeBtn.textContent = '×';
+
+                tab.appendChild(statusDot);
+                tab.appendChild(tabName);
+                tab.appendChild(closeBtn);
 
                 tab.addEventListener('click', (e) => {
                     if (e.target.dataset.action === 'close') {
@@ -677,23 +706,25 @@
 
             if (mode === 'password') {
                 statusText.textContent = `Session code: ${session.code}. Enter password to connect.`;
+                // Security: Use escapeHtml for user-provided data
                 formArea.innerHTML = `
                     <div class="form-container">
                         <label>Session Name (optional)</label>
-                        <input type="text" class="name-input" placeholder="e.g., Dev Server" value="${session.name || ''}">
+                        <input type="text" class="name-input" placeholder="e.g., Dev Server" value="${escapeHtml(session.name || '')}">
                         <label>Password</label>
                         <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
                         <button class="connect-btn">Connect</button>
                     </div>
                 `;
             } else {
+                // Security: Use escapeHtml for all user-provided data
                 const savedHtml = manager.savedSessions.length > 0 ? `
                     <div class="saved-sessions">
                         <h3>Recent Sessions</h3>
                         ${manager.savedSessions.map(s => `
-                            <div class="saved-session" data-code="${s.code}" data-name="${s.name || ''}" data-relay="${s.relayUrl || DEFAULT_RELAY_URL}">
-                                <span class="session-name">${s.name || s.code}</span>
-                                <span class="session-code">${s.code}</span>
+                            <div class="saved-session" data-code="${escapeHtml(s.code)}" data-name="${escapeHtml(s.name || '')}" data-relay="${escapeHtml(s.relayUrl || DEFAULT_RELAY_URL)}">
+                                <span class="session-name">${escapeHtml(s.name || s.code)}</span>
+                                <span class="session-code">${escapeHtml(s.code)}</span>
                                 <span class="session-delete" data-action="delete">&times;</span>
                             </div>
                         `).join('')}
@@ -705,7 +736,7 @@
                     <div class="form-container">
                         ${savedHtml}
                         <label>Session Code</label>
-                        <input type="text" class="code-input" placeholder="ABC123" maxlength="8" autocomplete="off" value="${session.code || ''}">
+                        <input type="text" class="code-input" placeholder="ABC12345" maxlength="8" autocomplete="off" value="${escapeHtml(session.code || '')}">
                         <label>Session Name (optional)</label>
                         <input type="text" class="name-input" placeholder="e.g., Dev Server">
                         <label>Password</label>

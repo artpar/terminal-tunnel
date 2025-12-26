@@ -19,13 +19,100 @@ import (
 
 // Short code alphabet (no ambiguous chars: 0/O, 1/I/l)
 const codeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-const codeLength = 6
+
+// Security: 8 chars = 31^8 = 852 billion possibilities (vs 31^6 = 887 million)
+const codeLength = 8
+
+// Rate limiting constants
+const (
+	rateLimitWindow   = 1 * time.Minute
+	maxRequestsPerIP  = 30 // Max requests per IP per minute
+	rateLimitCleanup  = 5 * time.Minute
+)
+
+// RateLimiter tracks request rates per IP
+type RateLimiter struct {
+	requests map[string][]time.Time
+	mu       sync.Mutex
+}
+
+// NewRateLimiter creates a new rate limiter
+func NewRateLimiter() *RateLimiter {
+	rl := &RateLimiter{
+		requests: make(map[string][]time.Time),
+	}
+	go rl.cleanupLoop()
+	return rl
+}
+
+// Allow checks if a request from the given IP should be allowed
+func (rl *RateLimiter) Allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rateLimitWindow)
+
+	// Filter to only recent requests
+	recent := make([]time.Time, 0)
+	for _, t := range rl.requests[ip] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+
+	if len(recent) >= maxRequestsPerIP {
+		rl.requests[ip] = recent
+		return false
+	}
+
+	rl.requests[ip] = append(recent, now)
+	return true
+}
+
+// cleanupLoop periodically removes old entries
+func (rl *RateLimiter) cleanupLoop() {
+	ticker := time.NewTicker(rateLimitCleanup)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		rl.mu.Lock()
+		cutoff := time.Now().Add(-rateLimitWindow)
+		for ip, times := range rl.requests {
+			recent := make([]time.Time, 0)
+			for _, t := range times {
+				if t.After(cutoff) {
+					recent = append(recent, t)
+				}
+			}
+			if len(recent) == 0 {
+				delete(rl.requests, ip)
+			} else {
+				rl.requests[ip] = recent
+			}
+		}
+		rl.mu.Unlock()
+	}
+}
+
+// Allowed CORS origins (security: prevent arbitrary websites from accessing API)
+var allowedOrigins = map[string]bool{
+	"https://artpar.github.io":   true,
+	"http://localhost":           true,
+	"http://localhost:8080":      true,
+	"http://127.0.0.1":           true,
+	"http://127.0.0.1:8080":      true,
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for relay
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // Allow non-browser clients
+		}
+		return allowedOrigins[origin]
 	},
 }
 
@@ -80,25 +167,59 @@ func generateShortCode() string {
 
 // RelayServer is a WebSocket relay server for SDP exchange
 type RelayServer struct {
-	sessions   map[string]*Session
-	shortCodes map[string]*Session // maps short code to session
-	mu         sync.RWMutex
-	expiration time.Duration
-	publicURL  string // Public URL for generating client links
+	sessions    map[string]*Session
+	shortCodes  map[string]*Session // maps short code to session
+	mu          sync.RWMutex
+	expiration  time.Duration
+	publicURL   string // Public URL for generating client links
+	rateLimiter *RateLimiter
 }
 
 // NewRelayServer creates a new relay server
 func NewRelayServer() *RelayServer {
 	rs := &RelayServer{
-		sessions:   make(map[string]*Session),
-		shortCodes: make(map[string]*Session),
-		expiration: 5 * time.Minute,
+		sessions:    make(map[string]*Session),
+		shortCodes:  make(map[string]*Session),
+		expiration:  5 * time.Minute,
+		rateLimiter: NewRateLimiter(),
 	}
 
 	// Start session cleanup goroutine
 	go rs.cleanupLoop()
 
 	return rs
+}
+
+// getClientIP extracts the client IP from the request
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header (for proxies)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	// Check X-Real-IP header
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	// Fall back to RemoteAddr
+	ip := r.RemoteAddr
+	if idx := strings.LastIndex(ip, ":"); idx != -1 {
+		ip = ip[:idx]
+	}
+	return ip
+}
+
+// setCORSHeaders sets CORS headers based on origin whitelist
+func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin != "" && allowedOrigins[origin] {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	} else if origin == "" {
+		// For non-browser clients, allow all
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
 // SetPublicURL sets the public URL for generating client links
@@ -306,8 +427,23 @@ func (rs *RelayServer) handleDisconnect(sessionID string, conn *websocket.Conn) 
 
 // HandleCreateSession handles POST /session - creates a new session with short code
 func (rs *RelayServer) HandleCreateSession(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Rate limiting
+	clientIP := getClientIP(r)
+	if !rs.rateLimiter.Allow(clientIP) {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		log.Printf("Rate limit exceeded for IP: %s", clientIP)
 		return
 	}
 
@@ -344,7 +480,7 @@ func (rs *RelayServer) HandleCreateSession(w http.ResponseWriter, r *http.Reques
 	rs.shortCodes[code] = session
 	rs.mu.Unlock()
 
-	log.Printf("Session created with code %s", code)
+	log.Printf("Session created with code %s from IP %s", code, clientIP)
 
 	// Build response
 	resp := SessionResponse{
@@ -356,15 +492,12 @@ func (rs *RelayServer) HandleCreateSession(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(resp)
 }
 
 // HandleGetSession handles GET /session/{code} - retrieves session SDP
 func (rs *RelayServer) HandleGetSession(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	setCORSHeaders(w, r)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -373,6 +506,13 @@ func (rs *RelayServer) HandleGetSession(w http.ResponseWriter, r *http.Request) 
 
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Rate limiting
+	clientIP := getClientIP(r)
+	if !rs.rateLimiter.Allow(clientIP) {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
@@ -402,9 +542,7 @@ func (rs *RelayServer) HandleGetSession(w http.ResponseWriter, r *http.Request) 
 
 // HandleSubmitAnswer handles POST /session/{code}/answer - submits answer SDP
 func (rs *RelayServer) HandleSubmitAnswer(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	setCORSHeaders(w, r)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -413,6 +551,13 @@ func (rs *RelayServer) HandleSubmitAnswer(w http.ResponseWriter, r *http.Request
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Rate limiting
+	clientIP := getClientIP(r)
+	if !rs.rateLimiter.Allow(clientIP) {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
@@ -462,9 +607,7 @@ func (rs *RelayServer) HandleSubmitAnswer(w http.ResponseWriter, r *http.Request
 
 // HandlePollAnswer handles GET /session/{code}/answer - polls for answer (long-polling)
 func (rs *RelayServer) HandlePollAnswer(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	setCORSHeaders(w, r)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -473,6 +616,13 @@ func (rs *RelayServer) HandlePollAnswer(w http.ResponseWriter, r *http.Request) 
 
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Rate limiting (but more lenient for polling)
+	clientIP := getClientIP(r)
+	if !rs.rateLimiter.Allow(clientIP) {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 

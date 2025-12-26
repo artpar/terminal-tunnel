@@ -4,12 +4,25 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/artpar/terminal-tunnel/internal/server"
 )
+
+// Security: Minimum password length to prevent brute-force attacks
+const MinPasswordLength = 12
+
+// MaxSessions limits the number of concurrent sessions (DoS protection)
+const MaxSessions = 100
+
+// ErrPasswordTooShort is returned when password doesn't meet minimum length
+var ErrPasswordTooShort = errors.New("password must be at least 12 characters")
+
+// ErrTooManySessions is returned when session limit is reached
+var ErrTooManySessions = errors.New("maximum session limit reached")
 
 // ManagedSession represents a session managed by the daemon
 type ManagedSession struct {
@@ -79,11 +92,23 @@ func generatePassword() string {
 func (sm *SessionManager) StartSession(params StartSessionParams) (*SessionStartResult, error) {
 	sm.mu.Lock()
 
+	// Security: Check session limit (DoS protection)
+	if len(sm.sessions) >= MaxSessions {
+		sm.mu.Unlock()
+		return nil, ErrTooManySessions
+	}
+
 	// Generate ID and password
 	id := generateID()
 	password := params.Password
 	if password == "" {
 		password = generatePassword()
+	} else {
+		// Security: Validate user-provided password length
+		if len(password) < MinPasswordLength {
+			sm.mu.Unlock()
+			return nil, ErrPasswordTooShort
+		}
 	}
 
 	shell := params.Shell
