@@ -155,10 +155,12 @@ function getCorsHeaders(request) {
   };
 }
 
-// Rate limiting helper
+// Rate limiting helper - uses fixed window with timestamp
 async function checkRateLimit(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const key = `ratelimit:${ip}`;
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = now - (now % RATE_LIMIT_WINDOW);
+  const key = `ratelimit:${ip}:${windowStart}`;
 
   const current = await env.SESSIONS.get(key);
   const count = current ? parseInt(current, 10) : 0;
@@ -167,8 +169,10 @@ async function checkRateLimit(request, env) {
     return false;
   }
 
+  // TTL = time remaining in window + buffer
+  const ttl = RATE_LIMIT_WINDOW - (now % RATE_LIMIT_WINDOW) + 10;
   await env.SESSIONS.put(key, String(count + 1), {
-    expirationTtl: RATE_LIMIT_WINDOW
+    expirationTtl: ttl
   });
 
   return true;
