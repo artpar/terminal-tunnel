@@ -4,6 +4,7 @@
 package server
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -15,8 +16,10 @@ import (
 
 // PTY manages a pseudo-terminal
 type PTY struct {
-	ptmx *os.File
-	cmd  *exec.Cmd
+	ptmx       *os.File
+	cmd        *exec.Cmd
+	pid        int  // stored PID for reattached PTYs
+	reattached bool // true if this PTY was reattached
 
 	mu     sync.Mutex
 	closed bool
@@ -51,6 +54,46 @@ func StartPTY(shell string) (*PTY, error) {
 	}, nil
 }
 
+// ReattachPTY reopens an existing PTY device and reconnects to a running shell
+// This is used to recover sessions after daemon restart
+func ReattachPTY(ptyPath string, shellPID int) (*PTY, error) {
+	// Verify the shell process is still running
+	if !IsProcessRunning(shellPID) {
+		return nil, fmt.Errorf("shell process %d is not running", shellPID)
+	}
+
+	// Open the PTY device
+	ptmx, err := os.OpenFile(ptyPath, os.O_RDWR, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open PTY %s: %w", ptyPath, err)
+	}
+
+	return &PTY{
+		ptmx:       ptmx,
+		pid:        shellPID,
+		reattached: true,
+	}, nil
+}
+
+// IsProcessRunning checks if a process with the given PID is running
+func IsProcessRunning(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// On Unix, FindProcess always succeeds, so we send signal 0 to check
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+// IsReattached returns true if this PTY was reattached after daemon restart
+func (p *PTY) IsReattached() bool {
+	return p.reattached
+}
+
 // Read reads data from the PTY
 func (p *PTY) Read(buf []byte) (int, error) {
 	return p.ptmx.Read(buf)
@@ -83,6 +126,9 @@ func (p *PTY) Name() string {
 
 // PID returns the shell process PID
 func (p *PTY) PID() int {
+	if p.reattached {
+		return p.pid
+	}
 	if p.cmd != nil && p.cmd.Process != nil {
 		return p.cmd.Process.Pid
 	}
@@ -100,8 +146,9 @@ func (p *PTY) Close() error {
 	p.mu.Unlock()
 
 	// Send SIGHUP to the process group
-	if p.cmd.Process != nil {
-		syscall.Kill(-p.cmd.Process.Pid, syscall.SIGHUP)
+	pid := p.PID()
+	if pid > 0 {
+		syscall.Kill(-pid, syscall.SIGHUP)
 	}
 
 	// Close the PTY
@@ -109,8 +156,10 @@ func (p *PTY) Close() error {
 		return err
 	}
 
-	// Wait for the process to exit
-	p.cmd.Wait()
+	// Wait for the process to exit (only for non-reattached PTYs)
+	if !p.reattached && p.cmd != nil {
+		p.cmd.Wait()
+	}
 	return nil
 }
 

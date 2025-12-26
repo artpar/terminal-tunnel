@@ -16,7 +16,8 @@ type ManagedSession struct {
 	State    *SessionState
 	Server   *server.Server
 	Cancel   context.CancelFunc
-	Password string // Not persisted, kept in memory
+	Password string      // Not persisted, kept in memory
+	pty      *server.PTY // For recovered sessions without server
 }
 
 // SessionState represents the persistent state of a session
@@ -222,8 +223,15 @@ func (sm *SessionManager) StopSession(idOrCode string) error {
 		return fmt.Errorf("session not found: %s", idOrCode)
 	}
 
-	// Cancel the context to stop the server
-	ms.Cancel()
+	// Cancel the context to stop the server (if running)
+	if ms.Cancel != nil {
+		ms.Cancel()
+	}
+
+	// Close PTY for recovered sessions without server
+	if ms.pty != nil && ms.Server == nil {
+		ms.pty.Close()
+	}
 
 	// Remove from maps
 	delete(sm.sessions, ms.State.ID)
@@ -243,7 +251,14 @@ func (sm *SessionManager) StopAllSessions() {
 	defer sm.mu.Unlock()
 
 	for _, ms := range sm.sessions {
-		ms.Cancel()
+		// Cancel server if running
+		if ms.Cancel != nil {
+			ms.Cancel()
+		}
+		// Close PTY for recovered sessions without server
+		if ms.pty != nil && ms.Server == nil {
+			ms.pty.Close()
+		}
 		if ms.State.ShortCode != "" {
 			RemoveSessionState(ms.State.ShortCode)
 		}
@@ -305,6 +320,56 @@ func (sm *SessionManager) SaveSession(ms *ManagedSession) error {
 	return SaveSessionState(ms.State)
 }
 
+// CleanupIdleSessions removes sessions that have been disconnected/recovered for too long
+func (sm *SessionManager) CleanupIdleSessions(idleTimeout time.Duration) int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	now := time.Now()
+	toRemove := make([]string, 0)
+
+	for id, ms := range sm.sessions {
+		// Only cleanup disconnected or recovered sessions
+		if ms.State.Status != StatusDisconnected && ms.State.Status != StatusRecovered {
+			continue
+		}
+
+		// Check if session has been idle too long
+		if now.Sub(ms.State.LastSeen) > idleTimeout {
+			toRemove = append(toRemove, id)
+		}
+	}
+
+	// Remove idle sessions
+	for _, id := range toRemove {
+		ms := sm.sessions[id]
+
+		// Cancel server if running
+		if ms.Cancel != nil {
+			ms.Cancel()
+		}
+
+		// Close PTY for recovered sessions
+		if ms.pty != nil && ms.Server == nil {
+			ms.pty.Close()
+		}
+
+		// Remove from maps
+		delete(sm.sessions, id)
+		if ms.State.ShortCode != "" {
+			delete(sm.byCode, ms.State.ShortCode)
+		}
+
+		// Remove state file
+		RemoveSessionState(ms.State.ShortCode)
+
+		fmt.Printf("Cleaned up idle session %s (code: %s, idle for: %v)\n",
+			id, ms.State.ShortCode, now.Sub(ms.State.LastSeen).Round(time.Second))
+	}
+
+	return len(toRemove)
+}
+
 // LoadFromDisk loads existing sessions from disk and attempts to reconnect
 func (sm *SessionManager) LoadFromDisk() error {
 	states, err := LoadAllSessionStates()
@@ -312,18 +377,57 @@ func (sm *SessionManager) LoadFromDisk() error {
 		return err
 	}
 
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	recoveredCount := 0
 	for _, state := range states {
 		// Check if shell process is still running
-		if !IsProcessRunning(state.ShellPID) {
+		if !server.IsProcessRunning(state.ShellPID) {
 			// Process dead, remove state file
+			fmt.Printf("Session %s: shell process %d no longer running, cleaning up\n",
+				state.ShortCode, state.ShellPID)
 			RemoveSessionState(state.ShortCode)
 			continue
 		}
 
-		// TODO: Implement PTY reattachment in Phase 3
-		// For now, just log that we found a surviving session
-		fmt.Printf("Found surviving session %s (PID %d) - reattachment not yet implemented\n",
-			state.ShortCode, state.ShellPID)
+		// Attempt to reattach PTY
+		pty, err := server.ReattachPTY(state.PTYPath, state.ShellPID)
+		if err != nil {
+			fmt.Printf("Session %s: failed to reattach PTY: %v, cleaning up\n",
+				state.ShortCode, err)
+			RemoveSessionState(state.ShortCode)
+			continue
+		}
+
+		// Create a managed session with the reattached PTY
+		// Note: No server is running - password required to resume signaling
+		state.Status = StatusRecovered
+		state.LastSeen = time.Now()
+
+		ms := &ManagedSession{
+			State:    state,
+			Server:   nil, // No server until resumed with password
+			Cancel:   nil,
+			Password: "", // Password not persisted for security
+			pty:      pty,
+		}
+
+		sm.sessions[state.ID] = ms
+		if state.ShortCode != "" {
+			sm.byCode[state.ShortCode] = ms
+		}
+
+		// Update state file
+		SaveSessionState(state)
+
+		fmt.Printf("✓ Recovered session %s (code: %s, PID: %d)\n",
+			state.ID, state.ShortCode, state.ShellPID)
+		recoveredCount++
+	}
+
+	if recoveredCount > 0 {
+		fmt.Printf("Recovered %d session(s) from previous daemon\n", recoveredCount)
 	}
 
 	return nil

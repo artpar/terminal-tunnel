@@ -19,6 +19,21 @@ func StartPTY(shell string) (*PTY, error) {
 	return nil, ErrWindowsNotSupported
 }
 
+// ReattachPTY is not supported on Windows
+func ReattachPTY(ptyPath string, shellPID int) (*PTY, error) {
+	return nil, ErrWindowsNotSupported
+}
+
+// IsProcessRunning checks if a process is running (stub for Windows)
+func IsProcessRunning(pid int) bool {
+	return false
+}
+
+// IsReattached returns whether this PTY was reattached (stub for Windows)
+func (p *PTY) IsReattached() bool {
+	return false
+}
+
 func (p *PTY) Read(buf []byte) (int, error)   { return 0, ErrWindowsNotSupported }
 func (p *PTY) Write(data []byte) (int, error) { return 0, ErrWindowsNotSupported }
 func (p *PTY) Resize(rows, cols uint16) error { return ErrWindowsNotSupported }

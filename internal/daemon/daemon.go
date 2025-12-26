@@ -13,16 +13,24 @@ import (
 	"time"
 )
 
+// Default timeouts
+const (
+	DefaultIdleTimeout    = 30 * time.Minute // Cleanup disconnected sessions after 30 mins
+	DefaultCleanupInterval = 1 * time.Minute  // Check for idle sessions every minute
+)
+
 // Daemon represents the terminal-tunnel daemon
 type Daemon struct {
-	statePath  string
-	listener   net.Listener
-	sessions   *SessionManager
-	startTime  time.Time
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	shutdownCh chan struct{}
+	statePath       string
+	listener        net.Listener
+	sessions        *SessionManager
+	startTime       time.Time
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	shutdownCh      chan struct{}
+	idleTimeout     time.Duration // How long a disconnected session can remain idle
+	cleanupInterval time.Duration // How often to check for idle sessions
 }
 
 // NewDaemon creates a new daemon instance
@@ -34,11 +42,13 @@ func NewDaemon() (*Daemon, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	d := &Daemon{
-		statePath:  GetStateDir(),
-		startTime:  time.Now(),
-		ctx:        ctx,
-		cancel:     cancel,
-		shutdownCh: make(chan struct{}),
+		statePath:       GetStateDir(),
+		startTime:       time.Now(),
+		ctx:             ctx,
+		cancel:          cancel,
+		shutdownCh:      make(chan struct{}),
+		idleTimeout:     DefaultIdleTimeout,
+		cleanupInterval: DefaultCleanupInterval,
 	}
 
 	d.sessions = NewSessionManager(d)
@@ -94,6 +104,9 @@ func (d *Daemon) Start() error {
 		case <-d.ctx.Done():
 		}
 	}()
+
+	// Start idle session cleanup goroutine
+	go d.cleanupLoop()
 
 	fmt.Printf("Daemon started (PID %d)\n", os.Getpid())
 	fmt.Printf("Socket: %s\n", socketPath)
@@ -328,4 +341,27 @@ func (d *Daemon) Shutdown() {
 // GetContext returns the daemon's context
 func (d *Daemon) GetContext() context.Context {
 	return d.ctx
+}
+
+// cleanupLoop periodically checks for and removes idle sessions
+func (d *Daemon) cleanupLoop() {
+	ticker := time.NewTicker(d.cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			cleaned := d.sessions.CleanupIdleSessions(d.idleTimeout)
+			if cleaned > 0 {
+				fmt.Printf("Cleaned up %d idle session(s)\n", cleaned)
+			}
+		case <-d.ctx.Done():
+			return
+		}
+	}
+}
+
+// GetIdleTimeout returns the configured idle timeout
+func (d *Daemon) GetIdleTimeout() time.Duration {
+	return d.idleTimeout
 }

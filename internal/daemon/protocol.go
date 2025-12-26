@@ -92,6 +92,7 @@ const (
 	StatusWaiting      SessionStatus = "waiting"
 	StatusConnected    SessionStatus = "connected"
 	StatusDisconnected SessionStatus = "disconnected"
+	StatusRecovered    SessionStatus = "recovered" // Shell alive but no signaling after daemon restart
 )
 
 // SessionInfo represents information about a session

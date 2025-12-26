@@ -96,6 +96,11 @@ func (s *Server) SetCallbacks(cb Callbacks) {
 	s.callbacks = cb
 }
 
+// SetPTY sets an existing PTY for session recovery (reattachment after daemon restart)
+func (s *Server) SetPTY(pty *PTY) {
+	s.pty = pty
+}
+
 // generateSessionID creates a unique session identifier
 func generateSessionID() string {
 	salt, _ := crypto.GenerateSalt()
