@@ -868,13 +868,17 @@
 
             session.dc.onopen = () => {
                 session.status = 'connected';
+                if (session.reconnectAttempts > 0) {
+                    console.log('Reconnected successfully after', session.reconnectAttempts, 'attempt(s)');
+                    session.reconnectAttempts = 0; // Reset only when truly connected
+                }
                 manager.saveSession(session);
                 showTerminal(session);
                 startPingInterval(session);
                 manager.updateUI();
             };
 
-            session.dc.onclose = () => handleDisconnect(session);
+            session.dc.onclose = () => handleDisconnect(session, true); // Auto-reconnect on dc close
 
             session.dc.onmessage = async (event) => {
                 try {
@@ -976,10 +980,9 @@
                             session.encryptionKey = await deriveKey(session.password, session.salt);
                         }
 
-                        // Establish connection
+                        // Establish connection (success is handled in dc.onopen)
                         await establishConnection(session, data.sdp, session.code);
-                        session.reconnectAttempts = 0; // Reset on success
-                        console.log('Reconnected successfully');
+                        // Note: reconnectAttempts is reset in dc.onopen when truly connected
                     } catch (err) {
                         console.log('Reconnect failed:', err.message);
                         session.status = 'disconnected';
