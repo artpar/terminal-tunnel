@@ -5,6 +5,7 @@ P2P terminal sharing with end-to-end encryption. Share your terminal from anywhe
 ## Features
 
 - **Zero setup** - Single binary, no dependencies
+- **Daemon mode** - Background service manages multiple concurrent sessions
 - **Fully P2P** - Direct WebRTC connection, your data never touches third-party servers
 - **E2E encrypted** - Password-derived keys using Argon2id + NaCl SecretBox
 - **Cross-NAT** - Works across different networks with multiple fallback modes
@@ -14,15 +15,35 @@ P2P terminal sharing with end-to-end encryption. Share your terminal from anywhe
 ## Quick Start
 
 ```bash
-# Start sharing your terminal
-./terminal-tunnel serve -p mysecretpassword
+# Start the daemon
+tt daemon start
+
+# Start a terminal session
+tt start -p mysecretpassword
 
 # Output:
-# Share this link: http://203.0.113.5:54321
-# Password: mysecretpassword
+# Session started:
+#   ID:       abc123
+#   Code:     XYZ789
+#   Password: mysecretpassword
+#   URL:      https://artpar.github.io/terminal-tunnel/?c=XYZ789
 ```
 
-Open the link in any browser, enter the password, and you're connected!
+Open the URL in any browser, enter the password, and you're connected!
+
+```bash
+# List active sessions
+tt list
+
+# Check daemon status
+tt status
+
+# Stop a session
+tt stop XYZ789
+
+# Stop the daemon
+tt daemon stop
+```
 
 ## Installation
 
@@ -33,8 +54,8 @@ Download from [Releases](https://github.com/artpar/terminal-tunnel/releases):
 ```bash
 # Linux/macOS
 tar -xzf terminal-tunnel-*.tar.gz
-chmod +x terminal-tunnel
-sudo mv terminal-tunnel /usr/local/bin/
+chmod +x tt
+sudo mv tt /usr/local/bin/
 ```
 
 ### From Source
@@ -43,71 +64,126 @@ sudo mv terminal-tunnel /usr/local/bin/
 go install github.com/artpar/terminal-tunnel/cmd/terminal-tunnel@latest
 ```
 
-## Connection Modes
+## Command Reference
 
-Terminal Tunnel automatically selects the best connection method:
-
-### 1. Direct Mode (Default)
-
-Works when your network allows incoming connections (UPnP enabled or port forwarded):
+### Daemon Commands
 
 ```bash
-./terminal-tunnel serve -p mypassword
+tt daemon start    # Start daemon in background
+tt daemon stop     # Stop daemon gracefully (terminates all sessions)
 ```
 
-### 2. Relay Mode
+### Session Commands
 
-Use a self-hosted relay server for signaling (data still flows P2P):
+```bash
+tt start [flags]   # Start a new terminal session
+tt stop <id|code>  # Stop a specific session
+tt list            # List all active sessions
+tt status          # Show daemon and session status
+```
+
+#### `tt start` Flags
+
+| Flag | Description |
+|------|-------------|
+| `-p, --password` | Password for E2E encryption (auto-generated if not provided) |
+| `-s, --shell` | Shell to use (default: $SHELL or /bin/sh) |
+
+### Relay Command
+
+```bash
+tt relay [flags]   # Run a signaling relay server
+
+Flags:
+  --port int       Port for relay server (default: 8765)
+```
+
+## Usage Examples
+
+### Basic Usage
+
+```bash
+# Start daemon (runs in background)
+tt daemon start
+# Daemon started (PID 12345)
+
+# Start a session with auto-generated password
+tt start
+# Session started:
+#   ID:       slUKah4FcXU
+#   Code:     QTDAS2
+#   Password: rAnDoMpAsSwOrD
+#   URL:      https://artpar.github.io/terminal-tunnel/?c=QTDAS2
+
+# Start a session with custom password
+tt start -p mypassword -s /bin/zsh
+
+# List all sessions
+tt list
+# ID           CODE    STATUS   SHELL    CREATED
+# slUKah4FcXU  QTDAS2  waiting  /bin/sh  2 mins ago
+# fFUq7tzPUkA  TBDZKF  connected /bin/zsh just now
+
+# Check status
+tt status
+# Daemon: running (PID 12345, uptime 10m)
+# Sessions: 2 total, 1 connected
+
+# Stop a session by code
+tt stop QTDAS2
+# Session QTDAS2 stopped
+
+# Stop daemon (terminates all sessions)
+tt daemon stop
+# Daemon stopped (1 sessions terminated)
+```
+
+### Running Multiple Sessions
+
+```bash
+# Start multiple sessions for different purposes
+tt start -p dev-session     # Development
+tt start -p demo-session    # Demo/presentation
+tt start -p support-session # Remote support
+
+# List all
+tt list
+# ID           CODE    STATUS   SHELL    CREATED
+# abc123       DEV001  waiting  /bin/zsh just now
+# def456       DEMO02  waiting  /bin/zsh just now
+# ghi789       SUP003  waiting  /bin/zsh just now
+```
+
+### Self-Hosted Relay
+
+For environments where the default relay isn't accessible:
 
 ```bash
 # On your server - start the relay
-./terminal-tunnel relay --port 8765
+tt relay --port 8765
 
-# On your machine - use the relay
-./terminal-tunnel serve -p mypassword --relay ws://your-server:8765
+# Sessions will automatically use the relay for signaling
+# (set RELAY_URL environment variable to customize)
 ```
-
-### 3. Manual Mode
-
-Works everywhere - exchange codes manually via any channel (email, chat, etc):
-
-```bash
-./terminal-tunnel serve -p mypassword --manual
-```
-
-Then:
-1. Copy the connection code displayed
-2. Open [artpar.github.io/terminal-tunnel](https://artpar.github.io/terminal-tunnel/)
-3. Paste the code and enter password
-4. Copy the answer code back to terminal
-
-## Web Client
-
-The web client is hosted at **https://artpar.github.io/terminal-tunnel/**
-
-It works in three modes:
-- **Auto** - When opened from a direct link
-- **Relay** - When connecting via a relay server
-- **Manual** - Paste connection codes for pure P2P
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  HOST                                                            │
-│  ./terminal-tunnel serve -p secret                               │
+│  DAEMON (tt daemon start)                                        │
+│  ~/.tt/tt.sock (Unix socket)                                     │
 ├──────────────────────────────────────────────────────────────────┤
-│  1. Start PTY (bash/zsh)                                         │
-│  2. Create WebRTC offer with ICE candidates                      │
-│  3. Share offer via HTTP / Relay / Manual                        │
-│  4. Receive answer, establish P2P DataChannel                    │
-│  5. Bridge: PTY ↔ Encrypted DataChannel                          │
+│                     SessionManager                               │
+│         ┌──────────────┬──────────────┬──────────────┐          │
+│         │   Session 1  │   Session 2  │   Session 3  │          │
+│         │  PTY+WebRTC  │  PTY+WebRTC  │  PTY+WebRTC  │          │
+│         └──────────────┴──────────────┴──────────────┘          │
 └──────────────────────────────────────────────────────────────────┘
-                              │
-                    WebRTC P2P (DTLS + E2E)
-                              │
+           │                    │                    │
+           │         WebRTC P2P (DTLS + E2E)         │
+           │                    │                    │
 ┌──────────────────────────────────────────────────────────────────┐
-│  CLIENT (Browser)                                                │
+│  CLIENTS (Browsers)                                              │
 │  https://artpar.github.io/terminal-tunnel/                       │
 ├──────────────────────────────────────────────────────────────────┤
 │  1. Load xterm.js terminal emulator                              │
@@ -118,29 +194,97 @@ It works in three modes:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## Command Reference
+### State Directory
 
-### `serve` - Share your terminal
-
-```bash
-terminal-tunnel serve [flags]
-
-Flags:
-  -p, --password string   Password for E2E encryption (required)
-  -s, --shell string      Shell to use (default: $SHELL)
-  -t, --timeout duration  Connection timeout (default: 5m)
-      --relay string      WebSocket relay URL for signaling
-      --no-relay          Disable relay, use manual if UPnP fails
-      --manual            Force manual mode (QR/copy-paste)
+```
+~/.tt/
+├── tt.pid          # Daemon PID file
+├── tt.sock         # Unix socket for IPC
+└── sessions/       # Session state files
+    └── XYZ789.json # Session state (keyed by short code)
 ```
 
-### `relay` - Run a signaling relay
+## Testing
+
+### Manual Testing
 
 ```bash
-terminal-tunnel relay [flags]
+# 1. Build the binary
+go build -o tt ./cmd/terminal-tunnel/
 
-Flags:
-      --port int   Port for relay server (default: 8765)
+# 2. Start the daemon
+./tt daemon start
+
+# 3. Start a session
+./tt start -p testpassword
+# Note the Code and URL
+
+# 4. Open URL in browser, enter password
+# You should see a terminal
+
+# 5. Test the connection
+# Type commands in browser, see output
+# Try resizing browser window
+
+# 6. Test session management
+./tt list
+./tt status
+
+# 7. Test disconnection/reconnection
+# Close browser tab, reopen URL
+# Session should reconnect
+
+# 8. Cleanup
+./tt stop <code>
+./tt daemon stop
+```
+
+### Testing Multiple Sessions
+
+```bash
+# Start daemon
+./tt daemon start
+
+# Start 3 sessions
+./tt start -p pass1
+./tt start -p pass2
+./tt start -p pass3
+
+# Verify all are listed
+./tt list
+
+# Connect to each from different browser tabs
+# Verify all work independently
+
+# Stop one session
+./tt stop <code>
+
+# Verify it's removed from list
+./tt list
+
+# Stop daemon (should terminate remaining sessions)
+./tt daemon stop
+```
+
+### Testing Connection Resilience
+
+```bash
+# Start daemon and session
+./tt daemon start
+./tt start -p test
+
+# Connect from browser
+# Verify terminal works
+
+# Test network interruption:
+# 1. Disable network briefly
+# 2. Re-enable network
+# 3. Session should auto-reconnect
+
+# Test server resilience:
+# 1. Kill daemon: kill $(cat ~/.tt/tt.pid)
+# 2. Restart daemon: ./tt daemon start
+# 3. Start new session (old sessions need manual restart)
 ```
 
 ## Security
@@ -176,12 +320,11 @@ Argon2id(password, salt, time=3, memory=64MB, threads=4) → 256-bit key
 | UPnP/NAT-PMP | Automatic port forwarding |
 | WebRTC ICE | Hole-punching for most NATs |
 | Relay | Signaling only, data stays P2P |
-| Manual | Works through any NAT |
 
 ### Limitations
 
-- **Symmetric NAT on both sides**: Use relay or manual mode
-- **Strict firewalls**: May block UDP, use manual mode
+- **Symmetric NAT on both sides**: May require TURN (not implemented)
+- **Strict firewalls**: May block UDP
 - **No TURN**: No data relay, keeps it truly P2P
 
 ## Platform Support
@@ -196,6 +339,10 @@ Argon2id(password, salt, time=3, memory=64MB, threads=4) → 256-bit key
 ## Building
 
 ```bash
+# Build for current platform
+go build -o tt ./cmd/terminal-tunnel/
+
+# Or use make
 make build          # Current platform
 make build-all      # All platforms
 make release        # Create archives
