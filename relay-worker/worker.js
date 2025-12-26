@@ -53,7 +53,7 @@ const landingPage = `<!DOCTYPE html>
     <h1>Terminal Tunnel</h1>
     <p class="tagline">P2P terminal sharing with E2E encryption</p>
     <form class="code-form" onsubmit="go(event)">
-      <input type="text" id="code" maxlength="6" placeholder="CODE" required>
+      <input type="text" id="code" maxlength="8" placeholder="CODE" required>
       <button type="submit">Connect</button>
     </form>
     <div class="divider">— or host —</div>
@@ -64,7 +64,7 @@ const landingPage = `<!DOCTYPE html>
       </div>
       <div class="step">
         <div class="step-label">Run</div>
-        <code>terminal-tunnel serve -p yourpassword</code>
+        <code>tt daemon start && tt start -p yourpassword</code>
       </div>
     </div>
     <div class="footer"><a href="https://github.com/artpar/terminal-tunnel">GitHub</a></div>
@@ -107,8 +107,22 @@ const serviceWorker = "self.addEventListener('install', e => self.skipWaiting())
   "});";
 
 const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-const CODE_LENGTH = 6;
+// Security: 8 chars = 31^8 = 852 billion possibilities (vs 31^6 = 887 million)
+const CODE_LENGTH = 8;
 const EXPIRY_SECONDS = 300; // 5 minutes
+
+// Rate limiting
+const RATE_LIMIT_WINDOW = 60; // 1 minute
+const MAX_REQUESTS_PER_IP = 30;
+
+// CORS whitelist
+const ALLOWED_ORIGINS = [
+  'https://artpar.github.io',
+  'http://localhost',
+  'http://localhost:8080',
+  'http://127.0.0.1',
+  'http://127.0.0.1:8080'
+];
 
 function generateCode() {
   let code = '';
@@ -118,20 +132,69 @@ function generateCode() {
   return code;
 }
 
+// Check if origin is allowed
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  return ALLOWED_ORIGINS.some(allowed => {
+    if (allowed.endsWith(':8080') || allowed.endsWith(':3000')) {
+      return origin === allowed;
+    }
+    return origin === allowed || origin.startsWith(allowed + ':');
+  });
+}
+
+// Get CORS headers for a request
+function getCorsHeaders(request) {
+  const origin = request.headers.get('Origin');
+  // Allow all origins for API endpoints (clients may be self-hosted)
+  // The security is in the short code + password, not CORS
+  return {
+    'Access-Control-Allow-Origin': origin || '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
+
+// Rate limiting helper
+async function checkRateLimit(request, env) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const key = `ratelimit:${ip}`;
+
+  const current = await env.SESSIONS.get(key);
+  const count = current ? parseInt(current, 10) : 0;
+
+  if (count >= MAX_REQUESTS_PER_IP) {
+    return false;
+  }
+
+  await env.SESSIONS.put(key, String(count + 1), {
+    expirationTtl: RATE_LIMIT_WINDOW
+  });
+
+  return true;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
 
     // CORS headers
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    };
+    const corsHeaders = getCorsHeaders(request);
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
+    }
+
+    // Rate limiting for API endpoints (not landing page)
+    if (path.startsWith('/session')) {
+      const allowed = await checkRateLimit(request, env);
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+          status: 429,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     // Landing page
