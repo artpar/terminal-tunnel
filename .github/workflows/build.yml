@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  BINARY_NAME: tt
+  GO_VERSION: '1.22'
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -16,7 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Run tests
         run: go test -v ./...
@@ -55,11 +59,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Build
         env:
@@ -68,16 +84,24 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
         run: |
-          VERSION=${GITHUB_REF_NAME:-dev}
-          BINARY_NAME=terminal-tunnel-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && '-v' }}${{ matrix.goarm }}${{ matrix.suffix }}
-          go build -ldflags="-s -w -X main.version=${VERSION}" -o ${BINARY_NAME} ./cmd/terminal-tunnel
-          ls -la ${BINARY_NAME}
+          ARCH_SUFFIX="${{ matrix.goarch }}"
+          if [ -n "${{ matrix.goarm }}" ]; then
+            ARCH_SUFFIX="${{ matrix.goarch }}v${{ matrix.goarm }}"
+          fi
+          OUTPUT_NAME="${{ env.BINARY_NAME }}-${{ matrix.goos }}-${ARCH_SUFFIX}${{ matrix.suffix }}"
+
+          go build -ldflags="-s -w -X main.version=${{ steps.version.outputs.version }}" \
+            -o "${OUTPUT_NAME}" ./cmd/terminal-tunnel
+
+          # Verify binary
+          ls -la "${OUTPUT_NAME}"
+          file "${OUTPUT_NAME}" || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: terminal-tunnel-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && '-v' }}${{ matrix.goarm }}
-          path: terminal-tunnel-*
+          name: ${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
+          path: ${{ env.BINARY_NAME }}-*
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -87,26 +111,95 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create archives
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create archives and checksums
         run: |
           mkdir -p release
+          VERSION=${{ steps.version.outputs.version }}
+
           for dir in artifacts/*/; do
             name=$(basename "$dir")
-            if [[ "$name" == *"windows"* ]]; then
-              cd "$dir" && zip -r "../../release/${name}.zip" . && cd ../..
-            else
-              cd "$dir" && tar -czf "../../release/${name}.tar.gz" . && cd ../..
+
+            # Find the binary in the directory
+            binary=$(find "$dir" -type f -name "${{ env.BINARY_NAME }}-*" | head -1)
+            if [ -z "$binary" ]; then
+              echo "No binary found in $dir"
+              continue
             fi
+
+            binary_name=$(basename "$binary")
+
+            # Create archive with version in name
+            archive_base="${{ env.BINARY_NAME }}-${VERSION}-${name#${{ env.BINARY_NAME }}-}"
+
+            if [[ "$name" == *"windows"* ]]; then
+              # For Windows, create zip
+              archive_name="${archive_base}.zip"
+              cd "$dir"
+              # Rename binary to just 'tt.exe' inside archive
+              cp "$binary_name" "${{ env.BINARY_NAME }}.exe"
+              zip -r "../../release/${archive_name}" "${{ env.BINARY_NAME }}.exe"
+              cd ../..
+            else
+              # For Unix, create tar.gz
+              archive_name="${archive_base}.tar.gz"
+              cd "$dir"
+              # Rename binary to just 'tt' inside archive
+              cp "$binary_name" "${{ env.BINARY_NAME }}"
+              chmod +x "${{ env.BINARY_NAME }}"
+              tar -czf "../../release/${archive_name}" "${{ env.BINARY_NAME }}"
+              cd ../..
+            fi
+
+            echo "Created: release/${archive_name}"
           done
-          ls -la release/
+
+          # Generate checksums
+          cd release
+          sha256sum * > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+          echo ""
+          echo "Release artifacts:"
+          ls -la
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: release/*
           generate_release_notes: true
+          body: |
+            ## Installation
+
+            ### Linux/macOS
+            ```bash
+            # Download and extract (example for Linux AMD64)
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/tt-${{ steps.version.outputs.version }}-linux-amd64.tar.gz
+            tar -xzf tt-${{ steps.version.outputs.version }}-linux-amd64.tar.gz
+            chmod +x tt
+            sudo mv tt /usr/local/bin/
+            ```
+
+            ### Windows
+            Download the `.zip` file, extract, and add to PATH.
+
+            ### Verify checksums
+            ```bash
+            sha256sum -c checksums-sha256.txt
+            ```
+
+            ## Quick Start
+            ```bash
+            tt daemon start
+            tt start -p mypassword
+            ```

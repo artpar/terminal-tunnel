@@ -340,13 +340,66 @@ Argon2id(password, salt, time=3, memory=64MB, threads=4) → 256-bit key
 
 ```bash
 # Build for current platform
-go build -o tt ./cmd/terminal-tunnel/
+make build
 
-# Or use make
-make build          # Current platform
-make build-all      # All platforms
-make release        # Create archives
+# Build for all platforms (static binaries)
+make build-all
+
+# Create release archives with checksums
+make release
+
+# Install to /usr/local/bin
+make install
+
+# See all targets
+make help
 ```
+
+### Static Builds
+
+All builds use `CGO_ENABLED=0` for fully static binaries with no external dependencies.
+
+| Platform | Architecture | Binary |
+|----------|--------------|--------|
+| Linux | amd64, arm64, armv7 | `tt-linux-{arch}` |
+| macOS | amd64, arm64 | `tt-darwin-{arch}` |
+| Windows | amd64, arm64 | `tt-windows-{arch}.exe` |
+| FreeBSD | amd64 | `tt-freebsd-amd64` |
+
+## CI/CD
+
+GitHub Actions automatically:
+- Runs tests on every push and PR
+- Builds static binaries for all platforms
+- Creates releases with archives and checksums when tags are pushed
+
+### Creating a Release
+
+```bash
+# Tag a new version
+git tag v1.0.0
+git push origin v1.0.0
+
+# GitHub Actions will automatically:
+# 1. Run tests
+# 2. Build all platform binaries
+# 3. Create archives (tar.gz for Unix, zip for Windows)
+# 4. Generate SHA256 checksums
+# 5. Create GitHub Release with all artifacts
+```
+
+### Release Artifacts
+
+Each release includes:
+- `tt-{version}-linux-amd64.tar.gz`
+- `tt-{version}-linux-arm64.tar.gz`
+- `tt-{version}-linux-armv7.tar.gz`
+- `tt-{version}-darwin-amd64.tar.gz`
+- `tt-{version}-darwin-arm64.tar.gz`
+- `tt-{version}-windows-amd64.zip`
+- `tt-{version}-windows-arm64.zip`
+- `tt-{version}-freebsd-amd64.tar.gz`
+- `checksums-sha256.txt`
 
 ## License
 

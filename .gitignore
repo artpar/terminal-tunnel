@@ -1,5 +1,6 @@
 # Binaries
 terminal-tunnel
+tt
 *.exe
 *.dll
 *.so
