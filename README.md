@@ -389,16 +389,31 @@ TURN (Traversal Using Relays around NAT) is enabled by default to handle symmetr
 - Mobile carriers (4G/5G)
 - Strict NAT routers
 
-The default TURN server is `openrelay.metered.ca` (free public TURN). You can configure custom TURN servers:
+The default TURN server is `staticauth.openrelay.metered.ca` using ephemeral credentials. For reliable TURN in production, configure your own server:
 
 ```bash
-# Using environment variables
+# Using environment variables (recommended for production)
 export TURN_URL="turn:your-turn-server.com:3478"
 export TURN_USERNAME="username"
 export TURN_PASSWORD="password"
 
 # Or disable TURN (P2P only mode)
 tt start --no-turn -p mypassword
+```
+
+**Self-hosted TURN (coturn):**
+```bash
+# Install coturn
+sudo apt install coturn
+
+# /etc/turnserver.conf
+listening-port=3478
+tls-listening-port=5349
+realm=yourdomain.com
+use-auth-secret
+static-auth-secret=your-secret-here
+
+# Start: turnserver
 ```
 
 ### Connection Modes

@@ -2,9 +2,13 @@
 package webrtc
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,18 +30,43 @@ var defaultSTUNServers = []string{
 	"stun:stun2.l.google.com:19302",
 }
 
-// Default public TURN servers (OpenRelay - free tier)
-// These are fallback TURN servers for symmetric NAT traversal
-var defaultTURNServers = []TURNConfig{
-	{
-		URLs: []string{
-			"turn:openrelay.metered.ca:80",
-			"turn:openrelay.metered.ca:443",
-			"turn:openrelay.metered.ca:443?transport=tcp",
-		},
-		Username:   "openrelayproject",
-		Credential: "openrelayproject",
-	},
+// Open Relay static-auth secret for generating ephemeral credentials
+const openRelaySecret = "openrelayprojectsecret"
+
+// Default public TURN servers (OpenRelay - free tier with static-auth)
+// Uses HMAC-based ephemeral credentials for authentication
+var defaultTURNURLs = []string{
+	"turn:staticauth.openrelay.metered.ca:80",
+	"turn:staticauth.openrelay.metered.ca:443",
+	"turn:staticauth.openrelay.metered.ca:443?transport=tcp",
+	"turns:staticauth.openrelay.metered.ca:443?transport=tcp",
+}
+
+// generateTURNCredentials generates ephemeral TURN credentials using HMAC-SHA1
+// This is the standard "static-auth-secret" mechanism used by coturn
+func generateTURNCredentials(secret string, ttlSeconds int64) (username, password string) {
+	// Username format: timestamp:randomID
+	// The timestamp is when the credentials expire
+	expiry := time.Now().Unix() + ttlSeconds
+	username = strconv.FormatInt(expiry, 10) + ":terminaltunnel"
+
+	// Password is HMAC-SHA1(secret, username) base64-encoded
+	h := hmac.New(sha1.New, []byte(secret))
+	h.Write([]byte(username))
+	password = base64.StdEncoding.EncodeToString(h.Sum(nil))
+
+	return username, password
+}
+
+// getDefaultTURNConfig generates TURN config with ephemeral credentials
+func getDefaultTURNConfig() TURNConfig {
+	// Generate credentials valid for 24 hours
+	username, password := generateTURNCredentials(openRelaySecret, 86400)
+	return TURNConfig{
+		URLs:       defaultTURNURLs,
+		Username:   username,
+		Credential: password,
+	}
 }
 
 // TURNConfig holds TURN server credentials
@@ -106,16 +135,17 @@ func buildICEServers(config Config) []webrtc.ICEServer {
 
 	// Add TURN servers if enabled
 	if config.UseTURN {
-		turnConfigs := config.TURNServers
+		var turnConfigs []TURNConfig
 
 		// Check environment variables first
 		if envTURN := GetTURNFromEnv(); envTURN != nil {
 			turnConfigs = []TURNConfig{*envTURN}
-		}
-
-		// Fall back to defaults if no custom TURN configured
-		if len(turnConfigs) == 0 {
-			turnConfigs = defaultTURNServers
+		} else if len(config.TURNServers) > 0 {
+			// Use custom TURN servers from config
+			turnConfigs = config.TURNServers
+		} else {
+			// Use default OpenRelay with ephemeral credentials
+			turnConfigs = []TURNConfig{getDefaultTURNConfig()}
 		}
 
 		for _, turn := range turnConfigs {

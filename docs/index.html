@@ -377,6 +377,52 @@
         const MSG_DATA = 0x01, MSG_RESIZE = 0x02, MSG_PING = 0x03, MSG_PONG = 0x04, MSG_CLOSE = 0x05;
         const COMPACT_VERSION = 0x01, SALT_SIZE = 16;
 
+        // Open Relay static-auth secret for TURN credentials
+        const TURN_SECRET = 'openrelayprojectsecret';
+        const TURN_URLS = [
+            'turn:staticauth.openrelay.metered.ca:80',
+            'turn:staticauth.openrelay.metered.ca:443',
+            'turn:staticauth.openrelay.metered.ca:443?transport=tcp',
+            'turns:staticauth.openrelay.metered.ca:443?transport=tcp'
+        ];
+
+        // Generate ephemeral TURN credentials using HMAC-SHA1 (coturn static-auth-secret)
+        async function generateTURNCredentials() {
+            const ttlSeconds = 86400; // 24 hours
+            const expiry = Math.floor(Date.now() / 1000) + ttlSeconds;
+            const username = expiry + ':terminaltunnel';
+
+            // Generate HMAC-SHA1 of username with secret
+            const encoder = new TextEncoder();
+            const key = await crypto.subtle.importKey(
+                'raw', encoder.encode(TURN_SECRET),
+                { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+            );
+            const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(username));
+            const password = btoa(String.fromCharCode(...new Uint8Array(signature)));
+
+            return { username, password };
+        }
+
+        // Get ICE servers with TURN credentials
+        async function getICEServers() {
+            try {
+                const { username, password } = await generateTURNCredentials();
+                return [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: TURN_URLS, username, credential: password }
+                ];
+            } catch (e) {
+                console.warn('Failed to generate TURN credentials:', e);
+                // Fallback to STUN only
+                return [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ];
+            }
+        }
+
         // Security: HTML escape function to prevent XSS
         function escapeHtml(text) {
             if (!text) return '';
@@ -848,23 +894,9 @@
         async function establishConnection(session, offerSdp, code) {
             const statusText = session.connectScreen.querySelector('.status-text');
 
-            session.pc = new RTCPeerConnection({
-                iceServers: [
-                    // STUN servers for public IP discovery
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    // TURN servers for symmetric NAT traversal (OpenRelay free tier)
-                    {
-                        urls: [
-                            'turn:openrelay.metered.ca:80',
-                            'turn:openrelay.metered.ca:443',
-                            'turn:openrelay.metered.ca:443?transport=tcp'
-                        ],
-                        username: 'openrelayproject',
-                        credential: 'openrelayproject'
-                    }
-                ]
-            });
+            // Get ICE servers with dynamically generated TURN credentials
+            const iceServers = await getICEServers();
+            session.pc = new RTCPeerConnection({ iceServers });
 
             session.pc.ondatachannel = (event) => {
                 session.dc = event.channel;
