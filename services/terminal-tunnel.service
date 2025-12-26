@@ -1,0 +1,39 @@
+# Systemd service file for Terminal Tunnel daemon
+# Install: sudo cp terminal-tunnel.service /etc/systemd/system/
+# Enable:  sudo systemctl enable terminal-tunnel
+# Start:   sudo systemctl start terminal-tunnel
+# Status:  sudo systemctl status terminal-tunnel
+# Logs:    journalctl -u terminal-tunnel -f
+
+[Unit]
+Description=Terminal Tunnel Daemon
+Documentation=https://github.com/artpar/terminal-tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/usr/local/bin/tt daemon foreground
+ExecStop=/usr/local/bin/tt daemon stop
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=%h/.tt
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+# Environment
+Environment=HOME=%h
+
+[Install]
+WantedBy=multi-user.target

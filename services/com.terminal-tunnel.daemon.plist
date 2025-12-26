@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Launchd plist for Terminal Tunnel daemon (macOS)
+  Install: cp com.terminal-tunnel.daemon.plist ~/Library/LaunchAgents/
+  Load:    launchctl load ~/Library/LaunchAgents/com.terminal-tunnel.daemon.plist
+  Unload:  launchctl unload ~/Library/LaunchAgents/com.terminal-tunnel.daemon.plist
+  Status:  launchctl list | grep terminal-tunnel
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.terminal-tunnel.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/tt</string>
+        <string>daemon</string>
+        <string>foreground</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/terminal-tunnel.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/terminal-tunnel.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>LowPriorityIO</key>
+    <false/>
+
+    <key>Nice</key>
+    <integer>0</integer>
+</dict>
+</plist>
