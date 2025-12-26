@@ -918,15 +918,21 @@
         function startPingInterval(session) {
             session.lastPongTime = Date.now(); // Initialize to now
             session.pingInterval = setInterval(() => {
+                // Check for pong timeout FIRST (outside dc state check)
+                if (session.lastPongTime && (Date.now() - session.lastPongTime) > PONG_TIMEOUT) {
+                    console.log('Connection timed out - no pong received for', Date.now() - session.lastPongTime, 'ms');
+                    handleDisconnect(session, true); // Auto-reconnect on timeout
+                    return;
+                }
+
+                // Only send ping if data channel is open
                 if (session.dc && session.dc.readyState === 'open') {
-                    // Check for pong timeout
-                    if (session.lastPongTime && (Date.now() - session.lastPongTime) > PONG_TIMEOUT) {
-                        console.log('Connection timed out - no pong received');
-                        handleDisconnect(session, true); // Auto-reconnect on timeout
-                        return;
-                    }
                     session.lastPingTime = Date.now();
                     sendMessage(session, MSG_PING, new Uint8Array(0));
+                } else if (session.status === 'connected') {
+                    // Data channel not open but we think we're connected - that's a problem
+                    console.log('Data channel not open but status is connected, dc state:',
+                        session.dc ? session.dc.readyState : 'no dc');
                 }
             }, 5000);
         }
