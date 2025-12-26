@@ -35,7 +35,8 @@ func NewBridge(pty *PTY, send func([]byte) error) *Bridge {
 	return &Bridge{}
 }
 
-func (b *Bridge) Start()                              {}
-func (b *Bridge) HandleData(data []byte) error        { return ErrWindowsNotSupported }
+func (b *Bridge) Start()                               {}
+func (b *Bridge) HandleData(data []byte) error         { return ErrWindowsNotSupported }
 func (b *Bridge) HandleResize(rows, cols uint16) error { return ErrWindowsNotSupported }
-func (b *Bridge) Close() error                        { return io.ErrClosedPipe }
+func (b *Bridge) Close() error                         { return io.ErrClosedPipe }
+func (b *Bridge) CloseWithoutPTY()                     {}

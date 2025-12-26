@@ -272,9 +272,10 @@ func (s *Server) Start() error {
 }
 
 // cleanupConnection cleans up the current connection for reconnection
+// PTY is kept running to allow client reconnection to the same session
 func (s *Server) cleanupConnection() {
 	if s.bridge != nil {
-		s.bridge.Close()
+		s.bridge.CloseWithoutPTY() // Keep PTY running for reconnection
 		s.bridge = nil
 	}
 	if s.channel != nil {

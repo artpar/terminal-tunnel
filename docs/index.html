@@ -15,12 +15,130 @@
         }
         #app { height: 100%; display: flex; flex-direction: column; }
 
-        /* Connection screen */
-        #connect-screen {
-            flex: 1; display: flex; flex-direction: column;
-            justify-content: center; align-items: center;
+        /* Tab bar */
+        .tab-bar {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            background: #0f0f1a;
+            border-bottom: 1px solid #2a2a4a;
+            padding: 0 8px;
+            height: 40px;
+            min-height: 40px;
+            gap: 4px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .tab-bar::-webkit-scrollbar { display: none; }
+
+        .tab {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            border-radius: 6px 6px 0 0;
+            color: #888;
+            font-size: 13px;
+            cursor: pointer;
+            white-space: nowrap;
+            max-width: 180px;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .tab:hover { background: #1a2a4e; }
+        .tab.active {
+            background: #1a1a2e;
+            color: #fff;
+            border-bottom-color: #1a1a2e;
+        }
+        .tab .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .tab .status-dot.connected { background: #4ecdc4; }
+        .tab .status-dot.connecting { background: #f9ca24; animation: pulse 1s infinite; }
+        .tab .status-dot.disconnected { background: #ff6b6b; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .tab .tab-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+        }
+        .tab .close-btn {
+            opacity: 0;
+            font-size: 16px;
+            line-height: 1;
+            padding: 2px;
+            border-radius: 3px;
+        }
+        .tab:hover .close-btn { opacity: 0.6; }
+        .tab .close-btn:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+
+        .new-tab-btn {
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px dashed #444;
+            border-radius: 6px;
+            color: #666;
+            font-size: 18px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .new-tab-btn:hover { background: #16213e; color: #888; border-color: #666; }
+
+        /* Mobile dropdown */
+        .mobile-session-select {
+            display: none;
+            flex: 1;
+            padding: 8px 12px;
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        @media (max-width: 600px) {
+            .tab { display: none; }
+            .mobile-session-select { display: block; }
+        }
+
+        /* Main content area */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            position: relative;
+        }
+
+        /* Session container - each session gets its own container */
+        .session-container {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            flex-direction: column;
+        }
+        .session-container.active {
+            display: flex;
+        }
+
+        /* Connection screen (for new/reconnect) */
+        .connect-screen {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             padding: 20px;
         }
+        .connect-screen.active { display: flex; }
+
         .logo { font-size: 48px; margin-bottom: 10px; }
         h1 { color: #e94560; margin-bottom: 20px; font-size: 24px; }
         .status { color: #888; margin-bottom: 20px; font-size: 14px; text-align: center; }
@@ -32,7 +150,7 @@
             width: 100%; max-width: 400px;
         }
         .form-container label { color: #888; display: block; margin-bottom: 8px; font-size: 14px; }
-        .form-container input, .form-container textarea {
+        .form-container input, .form-container textarea, .form-container select {
             width: 100%; padding: 12px; border: none; border-radius: 8px;
             background: #0f3460; color: #fff; font-size: 16px;
             margin-bottom: 15px; font-family: monospace;
@@ -41,8 +159,9 @@
             font-size: 24px; text-align: center; letter-spacing: 4px;
             text-transform: uppercase;
         }
-        .form-container textarea { height: 100px; resize: vertical; font-size: 12px; }
-        .form-container input:focus, .form-container textarea:focus { outline: 2px solid #e94560; }
+        .form-container input:focus, .form-container textarea:focus, .form-container select:focus {
+            outline: 2px solid #e94560;
+        }
         .form-container button {
             width: 100%; padding: 14px; border: none; border-radius: 8px;
             background: #e94560; color: #fff; font-size: 16px;
@@ -55,56 +174,102 @@
         }
         .form-container button.secondary:hover { background: #1a4a8a; }
 
-        /* Mode toggle */
-        .mode-toggle {
-            text-align: center; margin-top: 15px;
+        /* Saved sessions list */
+        .saved-sessions {
+            margin-bottom: 20px;
         }
-        .mode-toggle a {
-            color: #888; font-size: 12px; cursor: pointer;
-            text-decoration: underline;
+        .saved-sessions h3 {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
         }
-        .mode-toggle a:hover { color: #e94560; }
+        .saved-session {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            background: #0f3460;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            cursor: pointer;
+        }
+        .saved-session:hover { background: #1a4a8a; }
+        .saved-session .session-name { flex: 1; color: #fff; font-size: 14px; }
+        .saved-session .session-code { color: #888; font-size: 12px; margin-right: 8px; }
+        .saved-session .session-delete {
+            opacity: 0;
+            color: #ff6b6b;
+            font-size: 16px;
+            padding: 4px;
+        }
+        .saved-session:hover .session-delete { opacity: 0.6; }
+        .saved-session .session-delete:hover { opacity: 1; }
 
-        /* Answer display */
-        .answer-display {
-            background: #0f3460; padding: 15px; border-radius: 8px;
-            margin-top: 15px;
+        /* Terminal container */
+        .terminal-screen {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            min-height: 0;
         }
-        .answer-display label { color: #4ecdc4; margin-bottom: 10px; }
-        .answer-display textarea {
-            margin-bottom: 10px; background: #16213e;
+        .terminal-screen.active { display: flex; }
+
+        .terminal-container {
+            flex: 1;
+            padding: 4px;
+            position: relative;
+            min-height: 0;
         }
+        .terminal-container .xterm { height: 100%; }
 
-        /* Terminal screen */
-        #terminal-screen { display: none; flex: 1; flex-direction: column; }
-        #terminal-container { flex: 1; padding: 4px; position: relative; }
-        #terminal-container .xterm { height: 100%; }
-
-        /* Mobile keyboard helper - invisible input that triggers keyboard */
-        #mobile-input {
+        /* Mobile keyboard helper */
+        .mobile-input {
             position: absolute;
             top: 0; left: 0;
             width: 100%; height: 100%;
             opacity: 0;
-            font-size: 16px; /* Prevents zoom on iOS */
+            font-size: 16px;
             z-index: 10;
             pointer-events: none;
         }
-        #mobile-input.active {
-            pointer-events: auto;
-        }
+        .mobile-input.active { pointer-events: auto; }
 
-        .toolbar {
-            background: #16213e; padding: 8px 12px;
-            display: flex; justify-content: space-between; align-items: center;
+        /* Status bar */
+        .status-bar {
+            background: #0f0f1a;
+            border-top: 1px solid #2a2a4a;
+            padding: 6px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
         }
-        .toolbar-left { color: #4ecdc4; font-size: 14px; }
-        .toolbar-right button {
-            background: #0f3460; border: none; color: #888;
-            padding: 6px 12px; border-radius: 4px; cursor: pointer;
-            margin-left: 8px;
+        .status-bar-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #888;
         }
-        .toolbar-right button:hover { background: #e94560; color: #fff; }
+        .status-bar-left .latency { color: #4ecdc4; }
+        .status-bar-left .latency.warn { color: #f9ca24; }
+        .status-bar-left .latency.bad { color: #ff6b6b; }
+
+        .status-bar-right {
+            display: flex;
+            gap: 8px;
+        }
+        .status-bar button {
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            color: #888;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .status-bar button:hover { background: #1a2a4e; color: #fff; }
+        .status-bar button.reconnect-btn { border-color: #e94560; color: #e94560; }
+        .status-bar button.reconnect-btn:hover { background: #e94560; color: #fff; }
 
         /* Loading spinner */
         .spinner {
@@ -114,78 +279,76 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
+        /* Rename input overlay */
+        .rename-input {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%;
+            padding: 6px 8px;
+            background: #16213e;
+            border: 2px solid #e94560;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 13px;
+            z-index: 100;
+        }
+
         .hidden { display: none !important; }
+
+        /* Keyboard shortcut hints */
+        .shortcuts-hint {
+            position: fixed;
+            bottom: 50px;
+            right: 20px;
+            background: rgba(0,0,0,0.9);
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: #888;
+            display: none;
+        }
+        .shortcuts-hint.show { display: block; }
+        .shortcuts-hint kbd {
+            background: #16213e;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #fff;
+            margin-right: 8px;
+        }
     </style>
 </head>
 <body>
     <div id="app">
-        <!-- Connection Screen -->
-        <div id="connect-screen">
-            <div class="logo">🔗</div>
-            <h1>Terminal Tunnel</h1>
-            <div id="status" class="status">Initializing...</div>
-
-            <!-- Short code form (default) -->
-            <div id="code-form" class="form-container hidden">
-                <label for="code-input">Enter Session Code</label>
-                <input type="text" id="code-input" class="code-input" placeholder="ABC123" maxlength="8" autocomplete="off">
-                <label for="code-password">Password</label>
-                <input type="password" id="code-password" placeholder="Session password" autocomplete="off">
-                <button id="code-connect-btn">Connect</button>
-                <div class="mode-toggle">
-                    <a id="show-manual-mode">Have a connection code instead?</a>
-                </div>
-            </div>
-
-            <!-- Auto/HTTP mode form -->
-            <div id="auto-form" class="form-container hidden">
-                <label for="password">Enter Password</label>
-                <input type="password" id="password" placeholder="Session password" autocomplete="off">
-                <button id="connect-btn">Connect</button>
-            </div>
-
-            <!-- Manual mode form -->
-            <div id="manual-form" class="form-container hidden">
-                <label for="offer-input">Paste Connection Code</label>
-                <textarea id="offer-input" placeholder="Paste the full connection code from the host terminal..."></textarea>
-                <label for="manual-password">Password</label>
-                <input type="password" id="manual-password" placeholder="Session password" autocomplete="off">
-                <button id="manual-connect-btn">Connect</button>
-
-                <div id="manual-answer-section" class="hidden">
-                    <div class="answer-display">
-                        <label>Share this answer code with the host:</label>
-                        <textarea id="answer-output" readonly></textarea>
-                        <button id="copy-answer-btn" class="secondary">Copy to Clipboard</button>
-                    </div>
-                    <p style="color: #888; text-align: center; margin-top: 15px; font-size: 12px;">
-                        Waiting for host to complete connection...
-                    </p>
-                </div>
-
-                <div class="mode-toggle">
-                    <a id="show-code-mode">Have a 6-digit code?</a>
-                </div>
-            </div>
-
-            <div id="loading" class="spinner"></div>
+        <!-- Tab Bar -->
+        <div class="tab-bar">
+            <div id="tabs-container"></div>
+            <select class="mobile-session-select" id="mobile-select"></select>
+            <button class="new-tab-btn" id="new-tab-btn" title="New Session (Ctrl+T)">+</button>
         </div>
 
-        <!-- Terminal Screen -->
-        <div id="terminal-screen">
-            <div class="toolbar">
-                <div class="toolbar-left">
-                    <span id="connection-status">● Connected</span>
-                </div>
-                <div class="toolbar-right">
-                    <button id="fullscreen-btn">⛶</button>
-                    <button id="disconnect-btn">✕</button>
-                </div>
+        <!-- Main Content Area -->
+        <div class="main-content" id="main-content">
+            <!-- Sessions are dynamically added here -->
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-bar-left">
+                <span id="connection-status">No active session</span>
+                <span class="latency" id="latency"></span>
             </div>
-            <div id="terminal-container">
-                <input type="text" id="mobile-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text">
+            <div class="status-bar-right">
+                <button id="reconnect-btn" class="reconnect-btn hidden">Reconnect</button>
+                <button id="fullscreen-btn" title="Fullscreen">⛶</button>
             </div>
         </div>
+    </div>
+
+    <div class="shortcuts-hint" id="shortcuts-hint">
+        <div><kbd>Ctrl+T</kbd> New session</div>
+        <div><kbd>Ctrl+W</kbd> Close session</div>
+        <div><kbd>Ctrl+1-9</kbd> Switch tabs</div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
@@ -198,408 +361,589 @@
     (function() {
         'use strict';
 
-        // Default relay URL (update when public relay is deployed)
         const DEFAULT_RELAY_URL = 'https://terminal-tunnel-relay.artpar.workers.dev';
+        const STORAGE_KEY = 'tt_sessions';
+        const MSG_DATA = 0x01, MSG_RESIZE = 0x02, MSG_PING = 0x03, MSG_PONG = 0x04, MSG_CLOSE = 0x05;
+        const COMPACT_VERSION = 0x01, SALT_SIZE = 16;
 
-        // State
-        let pc = null;
-        let dc = null;
-        let term = null;
-        let fitAddon = null;
-        let encryptionKey = null;
-        let salt = null;
-        let connectionMode = 'code'; // code, auto, manual
-        let currentCode = null;
-        let relayUrl = DEFAULT_RELAY_URL;
+        // ============== Session Class ==============
+        class Session {
+            constructor(id) {
+                this.id = id;
+                this.code = null;
+                this.name = null;
+                this.relayUrl = DEFAULT_RELAY_URL;
+                this.connectionMode = 'code';
+                this.status = 'new'; // new, connecting, connected, disconnected
+                this.pc = null;
+                this.dc = null;
+                this.term = null;
+                this.fitAddon = null;
+                this.encryptionKey = null;
+                this.salt = null;
+                this.container = null;
+                this.connectScreen = null;
+                this.terminalScreen = null;
+                this.latency = null;
+                this.lastPingTime = null;
+                this.pingInterval = null;
+            }
 
-        // DOM elements
-        const connectScreen = document.getElementById('connect-screen');
-        const terminalScreen = document.getElementById('terminal-screen');
-        const statusEl = document.getElementById('status');
-        const loadingEl = document.getElementById('loading');
-        const codeForm = document.getElementById('code-form');
-        const autoForm = document.getElementById('auto-form');
-        const manualForm = document.getElementById('manual-form');
-        const codeInput = document.getElementById('code-input');
-        const codePasswordInput = document.getElementById('code-password');
-        const codeConnectBtn = document.getElementById('code-connect-btn');
-        const passwordInput = document.getElementById('password');
-        const connectBtn = document.getElementById('connect-btn');
-        const terminalContainer = document.getElementById('terminal-container');
-        const connectionStatus = document.getElementById('connection-status');
+            destroy() {
+                if (this.pingInterval) clearInterval(this.pingInterval);
+                if (this.dc) this.dc.close();
+                if (this.pc) this.pc.close();
+                if (this.term) this.term.dispose();
+                if (this.container) this.container.remove();
+            }
+        }
 
-        // Manual mode elements
-        const offerInput = document.getElementById('offer-input');
-        const manualPasswordInput = document.getElementById('manual-password');
-        const manualConnectBtn = document.getElementById('manual-connect-btn');
-        const manualAnswerSection = document.getElementById('manual-answer-section');
-        const answerOutput = document.getElementById('answer-output');
-        const copyAnswerBtn = document.getElementById('copy-answer-btn');
+        // ============== SessionManager Class ==============
+        class SessionManager {
+            constructor() {
+                this.sessions = new Map();
+                this.activeId = null;
+                this.savedSessions = this.loadSavedSessions();
+            }
 
-        // Mode toggle links
-        const showManualMode = document.getElementById('show-manual-mode');
-        const showCodeMode = document.getElementById('show-code-mode');
+            loadSavedSessions() {
+                try {
+                    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+                } catch { return []; }
+            }
 
-        // Message types (must match Go protocol)
-        const MSG_DATA = 0x01;
-        const MSG_RESIZE = 0x02;
-        const MSG_PING = 0x03;
-        const MSG_PONG = 0x04;
-        const MSG_CLOSE = 0x05;
+            saveSessions() {
+                const toSave = this.savedSessions.map(s => ({
+                    id: s.id, code: s.code, name: s.name,
+                    relayUrl: s.relayUrl, lastConnected: s.lastConnected,
+                    connectionMode: s.connectionMode
+                }));
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+            }
 
-        // Compact format version
-        const COMPACT_VERSION = 0x01;
-        const SALT_SIZE = 16;
+            saveSession(session) {
+                const existing = this.savedSessions.findIndex(s => s.code === session.code);
+                const data = {
+                    id: session.id,
+                    code: session.code,
+                    name: session.name || session.code,
+                    relayUrl: session.relayUrl,
+                    lastConnected: Date.now(),
+                    connectionMode: session.connectionMode
+                };
+                if (existing >= 0) {
+                    this.savedSessions[existing] = { ...this.savedSessions[existing], ...data };
+                } else {
+                    this.savedSessions.unshift(data);
+                    if (this.savedSessions.length > 10) this.savedSessions.pop();
+                }
+                this.saveSessions();
+            }
 
-        // Initialize
-        async function init() {
-            // Check URL params
+            deleteSavedSession(code) {
+                this.savedSessions = this.savedSessions.filter(s => s.code !== code);
+                this.saveSessions();
+            }
+
+            createSession() {
+                const id = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                const session = new Session(id);
+                this.sessions.set(id, session);
+                return session;
+            }
+
+            getSession(id) {
+                return this.sessions.get(id);
+            }
+
+            getActiveSession() {
+                return this.activeId ? this.sessions.get(this.activeId) : null;
+            }
+
+            setActive(id) {
+                this.activeId = id;
+                this.sessions.forEach((s, sid) => {
+                    if (s.container) {
+                        s.container.classList.toggle('active', sid === id);
+                    }
+                });
+                this.updateUI();
+            }
+
+            removeSession(id) {
+                const session = this.sessions.get(id);
+                if (session) {
+                    session.destroy();
+                    this.sessions.delete(id);
+                }
+                if (this.activeId === id) {
+                    const remaining = Array.from(this.sessions.keys());
+                    this.activeId = remaining.length > 0 ? remaining[0] : null;
+                }
+                this.updateUI();
+            }
+
+            updateUI() {
+                renderTabs();
+                renderMobileSelect();
+                updateStatusBar();
+            }
+        }
+
+        const manager = new SessionManager();
+
+        // ============== DOM References ==============
+        const tabsContainer = document.getElementById('tabs-container');
+        const mobileSelect = document.getElementById('mobile-select');
+        const mainContent = document.getElementById('main-content');
+        const newTabBtn = document.getElementById('new-tab-btn');
+        const reconnectBtn = document.getElementById('reconnect-btn');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const connectionStatusEl = document.getElementById('connection-status');
+        const latencyEl = document.getElementById('latency');
+
+        // ============== Initialization ==============
+        function init() {
             const params = new URLSearchParams(window.location.search);
             const code = params.get('c') || params.get('code');
-            const manualMode = params.get('manual');
-            const customRelay = params.get('relay');
 
-            if (customRelay) {
-                relayUrl = customRelay;
-            }
-
-            // If code is provided in URL, auto-fetch session
             if (code) {
-                currentCode = code.toUpperCase();
-                codeInput.value = currentCode;
-                loadingEl.classList.add('hidden');
-                codeForm.classList.remove('hidden');
-                codePasswordInput.focus();
-                setStatus(`Session code: ${currentCode}. Enter password to connect.`, 'info');
-                return;
+                const session = manager.createSession();
+                session.code = code.toUpperCase();
+                manager.setActive(session.id);
+                createSessionUI(session);
+                showConnectScreen(session, 'password');
+            } else {
+                showNewSessionDialog();
             }
 
-            // Manual mode
-            if (manualMode === 'true' || manualMode === '1') {
-                connectionMode = 'manual';
-                loadingEl.classList.add('hidden');
-                manualForm.classList.remove('hidden');
-                setStatus('Paste the connection code from the host', 'info');
-                return;
-            }
-
-            // Default: try to fetch /offer (for direct server mode)
-            try {
-                setStatus('Checking connection...', 'info');
-                const response = await fetch('/offer');
-                const data = await response.json();
-
-                salt = base64ToBytes(data.salt || '');
-                window.sessionOffer = data.offer;
-                window.sessionId = data.sessionId;
-                connectionMode = 'auto';
-
-                setStatus('Enter password to connect', 'info');
-                loadingEl.classList.add('hidden');
-                autoForm.classList.remove('hidden');
-                passwordInput.focus();
-
-            } catch (err) {
-                // No direct server - show code form
-                connectionMode = 'code';
-                loadingEl.classList.add('hidden');
-                codeForm.classList.remove('hidden');
-                codeInput.focus();
-                setStatus('Enter session code and password', 'info');
-            }
+            setupEventListeners();
         }
 
-        // Fetch session by short code
-        async function fetchSessionByCode(code) {
-            const response = await fetch(`${relayUrl}/session/${code.toUpperCase()}`);
-            if (!response.ok) {
-                if (response.status === 404) {
-                    throw new Error('Session not found or expired');
-                }
-                throw new Error('Failed to fetch session');
-            }
-            return await response.json();
-        }
+        // ============== UI Rendering ==============
+        function renderTabs() {
+            tabsContainer.innerHTML = '';
+            manager.sessions.forEach((session, id) => {
+                const tab = document.createElement('div');
+                tab.className = 'tab' + (id === manager.activeId ? ' active' : '');
+                tab.dataset.id = id;
 
-        // Submit answer to relay
-        async function submitAnswerToRelay(code, sdp) {
-            const response = await fetch(`${relayUrl}/session/${code.toUpperCase()}/answer`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sdp: sdp })
-            });
-            if (!response.ok) {
-                throw new Error('Failed to submit answer');
-            }
-        }
+                const statusClass = session.status === 'connected' ? 'connected' :
+                                   session.status === 'connecting' ? 'connecting' : 'disconnected';
 
-        // Connect with short code
-        async function connectWithCode() {
-            const code = codeInput.value.trim().toUpperCase();
-            const password = codePasswordInput.value;
+                tab.innerHTML = `
+                    <span class="status-dot ${statusClass}"></span>
+                    <span class="tab-name">${session.name || session.code || 'New Session'}</span>
+                    <span class="close-btn" data-action="close">&times;</span>
+                `;
 
-            if (!code || code.length < 4) {
-                setStatus('Please enter a valid session code', 'error');
-                return;
-            }
-            if (!password) {
-                setStatus('Please enter a password', 'error');
-                return;
-            }
-
-            codeConnectBtn.disabled = true;
-            currentCode = code;
-            setStatus('Fetching session...', 'info');
-
-            try {
-                const session = await fetchSessionByCode(code);
-                salt = base64ToBytes(session.salt || '');
-                await doConnect(password, session.sdp, salt, false, code);
-
-            } catch (err) {
-                setStatus('Error: ' + err.message, 'error');
-                codeConnectBtn.disabled = false;
-            }
-        }
-
-        // Connect with password (auto/direct mode)
-        async function connect() {
-            const password = passwordInput.value;
-            if (!password) {
-                setStatus('Please enter a password', 'error');
-                return;
-            }
-
-            connectBtn.disabled = true;
-            await doConnect(password, window.sessionOffer, salt, false, null);
-        }
-
-        // Connect in manual mode
-        async function manualConnect() {
-            const compactOffer = offerInput.value.trim();
-            const password = manualPasswordInput.value;
-
-            if (!compactOffer) {
-                setStatus('Please paste the connection code', 'error');
-                return;
-            }
-            if (!password) {
-                setStatus('Please enter a password', 'error');
-                return;
-            }
-
-            manualConnectBtn.disabled = true;
-            setStatus('Decoding offer...', 'info');
-
-            try {
-                const { sdp, decodedSalt } = decodeCompactOffer(compactOffer);
-                salt = decodedSalt;
-                window.sessionOffer = sdp;
-
-                await doConnect(password, sdp, salt, true, null);
-
-            } catch (err) {
-                setStatus('Failed to decode: ' + err.message, 'error');
-                manualConnectBtn.disabled = false;
-            }
-        }
-
-        // Common connection logic
-        async function doConnect(password, offer, saltBytes, isManual, shortCode) {
-            try {
-                setStatus('Deriving encryption key...', 'info');
-                encryptionKey = await deriveKey(password, saltBytes);
-
-                setStatus('Establishing connection...', 'info');
-
-                pc = new RTCPeerConnection({
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' }
-                    ]
+                tab.addEventListener('click', (e) => {
+                    if (e.target.dataset.action === 'close') {
+                        if (manager.sessions.size > 1 || session.status !== 'connected') {
+                            manager.removeSession(id);
+                            if (manager.sessions.size === 0) showNewSessionDialog();
+                        }
+                    } else {
+                        manager.setActive(id);
+                    }
                 });
 
-                pc.ondatachannel = (event) => {
-                    dc = event.channel;
-                    setupDataChannel();
-                };
+                tab.addEventListener('dblclick', (e) => {
+                    if (e.target.classList.contains('tab-name')) {
+                        startRename(session, e.target);
+                    }
+                });
 
-                await pc.setRemoteDescription({ type: 'offer', sdp: offer });
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                await waitForICE();
+                tabsContainer.appendChild(tab);
+            });
+        }
 
-                const answerSDP = pc.localDescription.sdp;
+        function renderMobileSelect() {
+            mobileSelect.innerHTML = '';
+            manager.sessions.forEach((session, id) => {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = session.name || session.code || 'New Session';
+                option.selected = id === manager.activeId;
+                mobileSelect.appendChild(option);
+            });
+        }
 
-                if (isManual) {
-                    // Show answer for user to copy
-                    const compactAnswer = encodeCompactAnswer(answerSDP);
-                    offerInput.parentElement.classList.add('hidden');
-                    manualAnswerSection.classList.remove('hidden');
-                    answerOutput.value = compactAnswer;
-                    setStatus('Copy the answer code and share with host', 'success');
-                } else if (shortCode) {
-                    // Submit answer via relay
-                    setStatus('Sending answer...', 'info');
-                    await submitAnswerToRelay(shortCode, answerSDP);
-                    setStatus('Waiting for connection...', 'success');
+        function startRename(session, element) {
+            const rect = element.getBoundingClientRect();
+            const input = document.createElement('input');
+            input.className = 'rename-input';
+            input.value = session.name || session.code || '';
+            input.style.top = rect.top + 'px';
+            input.style.left = rect.left + 'px';
+            input.style.width = rect.width + 'px';
 
-                    // Timeout if connection doesn't establish
-                    setTimeout(() => {
-                        if (!dc || dc.readyState !== 'open') {
-                            setStatus('Connection timeout - host may have disconnected. Ask host to restart.', 'error');
-                            codeConnectBtn.disabled = false;
-                        }
-                    }, 15000);
-                } else {
-                    // Send answer via HTTP (direct mode)
-                    setStatus('Sending answer...', 'info');
-                    const resp = await fetch('/answer', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ answer: answerSDP })
-                    });
-                    if (!resp.ok) throw new Error('Failed to send answer');
-                    setStatus('Waiting for connection...', 'success');
+            document.body.appendChild(input);
+            input.focus();
+            input.select();
+
+            const finish = () => {
+                const newName = input.value.trim();
+                if (newName) {
+                    session.name = newName;
+                    manager.saveSession(session);
                 }
+                input.remove();
+                renderTabs();
+            };
+
+            input.addEventListener('blur', finish);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') finish();
+                if (e.key === 'Escape') input.remove();
+            });
+        }
+
+        function updateStatusBar() {
+            const session = manager.getActiveSession();
+            if (!session) {
+                connectionStatusEl.textContent = 'No active session';
+                latencyEl.textContent = '';
+                reconnectBtn.classList.add('hidden');
+                return;
+            }
+
+            const statusText = {
+                'new': 'Ready to connect',
+                'connecting': 'Connecting...',
+                'connected': '● Connected',
+                'disconnected': '○ Disconnected'
+            };
+
+            connectionStatusEl.textContent = statusText[session.status] || session.status;
+            connectionStatusEl.style.color = session.status === 'connected' ? '#4ecdc4' :
+                                             session.status === 'connecting' ? '#f9ca24' : '#ff6b6b';
+
+            if (session.latency !== null && session.status === 'connected') {
+                latencyEl.textContent = `${session.latency}ms`;
+                latencyEl.className = 'latency' + (session.latency > 500 ? ' bad' : session.latency > 100 ? ' warn' : '');
+            } else {
+                latencyEl.textContent = '';
+            }
+
+            reconnectBtn.classList.toggle('hidden', session.status !== 'disconnected' || !session.code);
+        }
+
+        // ============== Session UI Creation ==============
+        function createSessionUI(session) {
+            const container = document.createElement('div');
+            container.className = 'session-container';
+            container.id = 'session-' + session.id;
+
+            container.innerHTML = `
+                <div class="connect-screen">
+                    <div class="logo">🔗</div>
+                    <h1>Terminal Tunnel</h1>
+                    <div class="status-text status">Initializing...</div>
+                    <div class="form-area"></div>
+                    <div class="spinner hidden"></div>
+                </div>
+                <div class="terminal-screen">
+                    <div class="terminal-container">
+                        <input type="text" class="mobile-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text">
+                    </div>
+                </div>
+            `;
+
+            mainContent.appendChild(container);
+            session.container = container;
+            session.connectScreen = container.querySelector('.connect-screen');
+            session.terminalScreen = container.querySelector('.terminal-screen');
+
+            if (session.id === manager.activeId) {
+                container.classList.add('active');
+            }
+
+            renderTabs();
+        }
+
+        function showConnectScreen(session, mode = 'full') {
+            session.connectScreen.classList.add('active');
+            session.terminalScreen.classList.remove('active');
+
+            const formArea = session.connectScreen.querySelector('.form-area');
+            const statusText = session.connectScreen.querySelector('.status-text');
+
+            if (mode === 'password') {
+                statusText.textContent = `Session code: ${session.code}. Enter password to connect.`;
+                formArea.innerHTML = `
+                    <div class="form-container">
+                        <label>Session Name (optional)</label>
+                        <input type="text" class="name-input" placeholder="e.g., Dev Server" value="${session.name || ''}">
+                        <label>Password</label>
+                        <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                        <button class="connect-btn">Connect</button>
+                    </div>
+                `;
+            } else {
+                const savedHtml = manager.savedSessions.length > 0 ? `
+                    <div class="saved-sessions">
+                        <h3>Recent Sessions</h3>
+                        ${manager.savedSessions.map(s => `
+                            <div class="saved-session" data-code="${s.code}" data-name="${s.name || ''}" data-relay="${s.relayUrl || DEFAULT_RELAY_URL}">
+                                <span class="session-name">${s.name || s.code}</span>
+                                <span class="session-code">${s.code}</span>
+                                <span class="session-delete" data-action="delete">&times;</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '';
+
+                statusText.textContent = 'Enter session code and password';
+                formArea.innerHTML = `
+                    <div class="form-container">
+                        ${savedHtml}
+                        <label>Session Code</label>
+                        <input type="text" class="code-input" placeholder="ABC123" maxlength="8" autocomplete="off" value="${session.code || ''}">
+                        <label>Session Name (optional)</label>
+                        <input type="text" class="name-input" placeholder="e.g., Dev Server">
+                        <label>Password</label>
+                        <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                        <button class="connect-btn">Connect</button>
+                    </div>
+                `;
+            }
+
+            // Event listeners
+            const connectBtn = formArea.querySelector('.connect-btn');
+            const passwordInput = formArea.querySelector('.password-input');
+            const codeInput = formArea.querySelector('.code-input');
+            const nameInput = formArea.querySelector('.name-input');
+
+            connectBtn.addEventListener('click', () => startConnection(session, formArea));
+            passwordInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') startConnection(session, formArea);
+            });
+            if (codeInput) {
+                codeInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') passwordInput.focus();
+                });
+            }
+
+            // Saved session click handlers
+            formArea.querySelectorAll('.saved-session').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    if (e.target.dataset.action === 'delete') {
+                        manager.deleteSavedSession(el.dataset.code);
+                        el.remove();
+                        return;
+                    }
+                    if (codeInput) codeInput.value = el.dataset.code;
+                    if (nameInput) nameInput.value = el.dataset.name;
+                    session.relayUrl = el.dataset.relay;
+                    passwordInput.focus();
+                });
+            });
+
+            setTimeout(() => (codeInput || passwordInput).focus(), 100);
+        }
+
+        function showNewSessionDialog() {
+            const session = manager.createSession();
+            manager.setActive(session.id);
+            createSessionUI(session);
+            showConnectScreen(session, 'full');
+        }
+
+        // ============== Connection Logic ==============
+        async function startConnection(session, formArea) {
+            const codeInput = formArea.querySelector('.code-input');
+            const passwordInput = formArea.querySelector('.password-input');
+            const nameInput = formArea.querySelector('.name-input');
+            const connectBtn = formArea.querySelector('.connect-btn');
+            const spinner = session.connectScreen.querySelector('.spinner');
+            const statusText = session.connectScreen.querySelector('.status-text');
+
+            const code = (codeInput ? codeInput.value : session.code || '').trim().toUpperCase();
+            const password = passwordInput.value;
+            const name = nameInput ? nameInput.value.trim() : '';
+
+            if (!code || code.length < 4) {
+                statusText.textContent = 'Please enter a valid session code';
+                statusText.classList.add('error');
+                return;
+            }
+            if (!password) {
+                statusText.textContent = 'Please enter a password';
+                statusText.classList.add('error');
+                return;
+            }
+
+            session.code = code;
+            session.name = name || code;
+            session.status = 'connecting';
+            connectBtn.disabled = true;
+            spinner.classList.remove('hidden');
+            statusText.classList.remove('error');
+            manager.updateUI();
+
+            try {
+                statusText.textContent = 'Fetching session...';
+                const response = await fetch(`${session.relayUrl}/session/${code}`);
+                if (!response.ok) {
+                    throw new Error(response.status === 404 ? 'Session not found or expired' : 'Failed to fetch session');
+                }
+                const data = await response.json();
+                session.salt = base64ToBytes(data.salt || '');
+
+                statusText.textContent = 'Deriving encryption key...';
+                session.encryptionKey = await deriveKey(password, session.salt);
+
+                statusText.textContent = 'Establishing connection...';
+                await establishConnection(session, data.sdp, code);
 
             } catch (err) {
-                setStatus('Connection failed: ' + err.message, 'error');
-                codeConnectBtn.disabled = false;
+                statusText.textContent = 'Error: ' + err.message;
+                statusText.classList.add('error');
+                session.status = 'disconnected';
                 connectBtn.disabled = false;
-                manualConnectBtn.disabled = false;
+                spinner.classList.add('hidden');
+                manager.updateUI();
             }
         }
 
-        // Decode compact offer (matches Go implementation)
-        function decodeCompactOffer(encoded) {
-            let data;
-            try {
-                const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-                const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-                data = Uint8Array.from(atob(padded), c => c.charCodeAt(0));
-            } catch (e) {
-                throw new Error('Invalid base64 encoding');
-            }
+        async function establishConnection(session, offerSdp, code) {
+            const statusText = session.connectScreen.querySelector('.status-text');
 
-            if (data.length < 1 + SALT_SIZE + 1) {
-                throw new Error('Data too short');
-            }
+            session.pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            });
 
-            const version = data[0];
-            if (version !== COMPACT_VERSION) {
-                throw new Error('Unsupported version: ' + version);
-            }
-
-            const decodedSalt = data.slice(1, 1 + SALT_SIZE);
-            const compressed = data.slice(1 + SALT_SIZE);
-
-            let sdpBytes;
-            try {
-                sdpBytes = pako.inflateRaw(compressed);
-            } catch (e) {
-                throw new Error('Decompression failed: ' + e.message);
-            }
-
-            return {
-                sdp: new TextDecoder().decode(sdpBytes),
-                decodedSalt: decodedSalt
+            session.pc.ondatachannel = (event) => {
+                session.dc = event.channel;
+                setupDataChannel(session);
             };
+
+            session.pc.onconnectionstatechange = () => {
+                if (session.pc.connectionState === 'disconnected' || session.pc.connectionState === 'failed') {
+                    handleDisconnect(session);
+                }
+            };
+
+            await session.pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
+            const answer = await session.pc.createAnswer();
+            await session.pc.setLocalDescription(answer);
+            await waitForICE(session.pc);
+
+            statusText.textContent = 'Sending answer...';
+            const resp = await fetch(`${session.relayUrl}/session/${code}/answer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sdp: session.pc.localDescription.sdp })
+            });
+
+            if (!resp.ok) throw new Error('Failed to submit answer');
+
+            statusText.textContent = 'Waiting for connection...';
+
+            setTimeout(() => {
+                if (session.status === 'connecting') {
+                    statusText.textContent = 'Connection timeout. Host may have disconnected.';
+                    statusText.classList.add('error');
+                    session.status = 'disconnected';
+                    manager.updateUI();
+                }
+            }, 15000);
         }
 
-        // Encode compact answer
-        function encodeCompactAnswer(sdp) {
-            const sdpBytes = new TextEncoder().encode(sdp);
-            const compressed = pako.deflateRaw(sdpBytes);
+        function setupDataChannel(session) {
+            session.dc.binaryType = 'arraybuffer';
 
-            const data = new Uint8Array(1 + compressed.length);
-            data[0] = COMPACT_VERSION;
-            data.set(compressed, 1);
-
-            const base64 = btoa(String.fromCharCode.apply(null, data));
-            return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        }
-
-        // Setup data channel handlers
-        function setupDataChannel() {
-            dc.binaryType = 'arraybuffer';
-
-            dc.onopen = () => {
-                showTerminal();
+            session.dc.onopen = () => {
+                session.status = 'connected';
+                manager.saveSession(session);
+                showTerminal(session);
+                startPingInterval(session);
+                manager.updateUI();
             };
 
-            dc.onclose = () => {
-                connectionStatus.textContent = '● Disconnected';
-                connectionStatus.style.color = '#ff6b6b';
-            };
+            session.dc.onclose = () => handleDisconnect(session);
 
-            dc.onmessage = async (event) => {
+            session.dc.onmessage = async (event) => {
                 try {
-                    const decrypted = await decrypt(new Uint8Array(event.data));
+                    const decrypted = await decrypt(session, new Uint8Array(event.data));
                     const msg = parseMessage(decrypted);
 
                     if (msg.type === MSG_DATA) {
-                        term.write(new Uint8Array(msg.payload));
+                        session.term.write(new Uint8Array(msg.payload));
                     } else if (msg.type === MSG_PING) {
-                        sendMessage(MSG_PONG, new Uint8Array(0));
+                        sendMessage(session, MSG_PONG, new Uint8Array(0));
+                    } else if (msg.type === MSG_PONG) {
+                        if (session.lastPingTime) {
+                            session.latency = Date.now() - session.lastPingTime;
+                            manager.updateUI();
+                        }
                     } else if (msg.type === MSG_CLOSE) {
-                        dc.close();
+                        session.dc.close();
                     }
-                } catch (err) {
-                    // Decryption failed - ignore
-                }
+                } catch (err) { /* ignore decryption errors */ }
             };
         }
 
-        // Detect mobile device
-        function isMobile() {
-            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-                   ('ontouchstart' in window) ||
-                   (navigator.maxTouchPoints > 0);
+        function handleDisconnect(session) {
+            session.status = 'disconnected';
+            if (session.pingInterval) {
+                clearInterval(session.pingInterval);
+                session.pingInterval = null;
+            }
+            manager.updateUI();
         }
 
-        // Show terminal
-        function showTerminal() {
-            connectScreen.style.display = 'none';
-            terminalScreen.style.display = 'flex';
+        function startPingInterval(session) {
+            session.pingInterval = setInterval(() => {
+                if (session.dc && session.dc.readyState === 'open') {
+                    session.lastPingTime = Date.now();
+                    sendMessage(session, MSG_PING, new Uint8Array(0));
+                }
+            }, 5000);
+        }
 
-            const mobileInput = document.getElementById('mobile-input');
+        // ============== Terminal ==============
+        function isMobile() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                   ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        }
+
+        function showTerminal(session) {
+            session.connectScreen.classList.remove('active');
+            session.terminalScreen.classList.add('active');
+
+            const termContainer = session.terminalScreen.querySelector('.terminal-container');
+            const mobileInput = session.terminalScreen.querySelector('.mobile-input');
             const mobile = isMobile();
 
-            term = new Terminal({
+            session.term = new Terminal({
                 cursorBlink: true,
                 fontSize: mobile ? 12 : 14,
                 fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-                theme: {
-                    background: '#1a1a2e',
-                    foreground: '#e0e0e0',
-                    cursor: '#e94560'
-                }
+                theme: { background: '#1a1a2e', foreground: '#e0e0e0', cursor: '#e94560' }
             });
 
-            fitAddon = new FitAddon.FitAddon();
-            term.loadAddon(fitAddon);
-            term.open(terminalContainer);
-            fitAddon.fit();
+            session.fitAddon = new FitAddon.FitAddon();
+            session.term.loadAddon(session.fitAddon);
+            session.term.open(termContainer);
+            session.fitAddon.fit();
 
-            term.onData((data) => {
-                sendMessage(MSG_DATA, new TextEncoder().encode(data));
+            session.term.onData((data) => {
+                sendMessage(session, MSG_DATA, new TextEncoder().encode(data));
             });
 
             if (mobile) {
-                // Mobile: use hidden input to capture keyboard
                 mobileInput.classList.add('active');
-
-                // Forward input to terminal
                 mobileInput.addEventListener('input', (e) => {
-                    const data = e.target.value;
-                    if (data) {
-                        sendMessage(MSG_DATA, new TextEncoder().encode(data));
+                    if (e.target.value) {
+                        sendMessage(session, MSG_DATA, new TextEncoder().encode(e.target.value));
                         e.target.value = '';
                     }
                 });
-
-                // Handle special keys
                 mobileInput.addEventListener('keydown', (e) => {
                     let data = null;
                     switch (e.key) {
@@ -613,60 +957,95 @@
                         case 'ArrowLeft': data = '\x1b[D'; break;
                     }
                     if (data) {
-                        sendMessage(MSG_DATA, new TextEncoder().encode(data));
+                        sendMessage(session, MSG_DATA, new TextEncoder().encode(data));
                         e.preventDefault();
                     }
                 });
-
-                // Touch to focus and show keyboard
-                terminalContainer.addEventListener('touchstart', (e) => {
-                    mobileInput.focus();
-                    // Prevent double-tap zoom
-                    if (e.touches.length === 1) {
-                        e.preventDefault();
-                    }
-                }, { passive: false });
-
-                // Also handle click for hybrid devices
-                terminalContainer.addEventListener('click', () => {
-                    mobileInput.focus();
-                });
-
-                // Focus mobile input initially
-                setTimeout(() => mobileInput.focus(), 100);
-
+                termContainer.addEventListener('touchstart', () => mobileInput.focus(), { passive: true });
+                termContainer.addEventListener('click', () => mobileInput.focus());
             } else {
-                // Desktop: use xterm's built-in keyboard handling
-                terminalContainer.addEventListener('click', () => term.focus());
-                term.focus();
+                termContainer.addEventListener('click', () => session.term.focus());
+                session.term.focus();
             }
 
-            term.onResize(({ rows, cols }) => {
+            session.term.onResize(({ rows, cols }) => {
                 const payload = new Uint8Array(4);
                 new DataView(payload.buffer).setUint16(0, rows, false);
                 new DataView(payload.buffer).setUint16(2, cols, false);
-                sendMessage(MSG_RESIZE, payload);
+                sendMessage(session, MSG_RESIZE, payload);
             });
 
-            window.addEventListener('resize', () => fitAddon.fit());
+            window.addEventListener('resize', () => {
+                if (session.fitAddon) session.fitAddon.fit();
+            });
 
-            // Send initial size
             setTimeout(() => {
-                const { rows, cols } = term;
+                session.fitAddon.fit();
+                const { rows, cols } = session.term;
                 const payload = new Uint8Array(4);
                 new DataView(payload.buffer).setUint16(0, rows, false);
                 new DataView(payload.buffer).setUint16(2, cols, false);
-                sendMessage(MSG_RESIZE, payload);
+                sendMessage(session, MSG_RESIZE, payload);
             }, 100);
         }
 
-        // Wait for ICE gathering
-        function waitForICE() {
+        // ============== Crypto ==============
+        async function deriveKey(password, saltBytes) {
+            const result = await argon2.hash({
+                pass: password, salt: saltBytes,
+                time: 3, mem: 65536, parallelism: 4, hashLen: 32,
+                type: argon2.ArgonType.Argon2id
+            });
+            return new Uint8Array(result.hash);
+        }
+
+        async function encrypt(session, data) {
+            const nonce = nacl.randomBytes(24);
+            const encrypted = nacl.secretbox(data, nonce, session.encryptionKey);
+            const result = new Uint8Array(nonce.length + encrypted.length);
+            result.set(nonce);
+            result.set(encrypted, nonce.length);
+            return result;
+        }
+
+        async function decrypt(session, data) {
+            const nonce = data.slice(0, 24);
+            const ciphertext = data.slice(24);
+            const decrypted = nacl.secretbox.open(ciphertext, nonce, session.encryptionKey);
+            if (!decrypted) throw new Error('Decryption failed');
+            return decrypted;
+        }
+
+        function parseMessage(data) {
+            const type = data[0];
+            const length = (data[1] << 8) | data[2];
+            return { type, payload: data.slice(3, 3 + length) };
+        }
+
+        async function sendMessage(session, type, payload) {
+            const msg = new Uint8Array(3 + payload.length);
+            msg[0] = type;
+            msg[1] = (payload.length >> 8) & 0xff;
+            msg[2] = payload.length & 0xff;
+            msg.set(payload, 3);
+            const encrypted = await encrypt(session, msg);
+            if (session.dc && session.dc.readyState === 'open') {
+                session.dc.send(encrypted);
+            }
+        }
+
+        function base64ToBytes(base64) {
+            try {
+                const binary = atob(base64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                return bytes;
+            } catch { return new Uint8Array(0); }
+        }
+
+        function waitForICE(pc) {
             return new Promise((resolve) => {
-                if (pc.iceGatheringState === 'complete') {
-                    resolve();
-                    return;
-                }
+                if (pc.iceGatheringState === 'complete') { resolve(); return; }
                 const check = () => {
                     if (pc.iceGatheringState === 'complete') {
                         pc.removeEventListener('icegatheringstatechange', check);
@@ -678,140 +1057,79 @@
             });
         }
 
-        // Derive encryption key using Argon2
-        async function deriveKey(password, saltBytes) {
-            const result = await argon2.hash({
-                pass: password,
-                salt: saltBytes,
-                time: 3,
-                mem: 65536,
-                parallelism: 4,
-                hashLen: 32,
-                type: argon2.ArgonType.Argon2id
+        // ============== Event Listeners ==============
+        function setupEventListeners() {
+            newTabBtn.addEventListener('click', showNewSessionDialog);
+
+            mobileSelect.addEventListener('change', (e) => {
+                manager.setActive(e.target.value);
             });
-            return new Uint8Array(result.hash);
-        }
 
-        // Encrypt data
-        async function encrypt(data) {
-            const nonce = nacl.randomBytes(24);
-            const encrypted = nacl.secretbox(data, nonce, encryptionKey);
-            const result = new Uint8Array(nonce.length + encrypted.length);
-            result.set(nonce);
-            result.set(encrypted, nonce.length);
-            return result;
-        }
-
-        // Decrypt data
-        async function decrypt(data) {
-            const nonce = data.slice(0, 24);
-            const ciphertext = data.slice(24);
-            const decrypted = nacl.secretbox.open(ciphertext, nonce, encryptionKey);
-            if (!decrypted) throw new Error('Decryption failed');
-            return decrypted;
-        }
-
-        // Parse message - format: [type: 1 byte][length: 2 bytes big-endian][payload]
-        function parseMessage(data) {
-            const type = data[0];
-            const length = (data[1] << 8) | data[2];
-            return {
-                type: type,
-                payload: data.slice(3, 3 + length)
-            };
-        }
-
-        // Send message - format: [type: 1 byte][length: 2 bytes big-endian][payload]
-        async function sendMessage(type, payload) {
-            const msg = new Uint8Array(3 + payload.length);
-            msg[0] = type;
-            msg[1] = (payload.length >> 8) & 0xff;
-            msg[2] = payload.length & 0xff;
-            msg.set(payload, 3);
-            const encrypted = await encrypt(msg);
-            if (dc && dc.readyState === 'open') {
-                dc.send(encrypted);
-            }
-        }
-
-        // Set status message
-        function setStatus(message, type) {
-            statusEl.textContent = message;
-            statusEl.className = 'status';
-            if (type === 'error') statusEl.classList.add('error');
-            if (type === 'success') statusEl.classList.add('success');
-        }
-
-        // Helper functions
-        function base64ToBytes(base64) {
-            try {
-                const binary = atob(base64);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) {
-                    bytes[i] = binary.charCodeAt(i);
+            reconnectBtn.addEventListener('click', () => {
+                const session = manager.getActiveSession();
+                if (session && session.code) {
+                    session.status = 'new';
+                    session.pc = null;
+                    session.dc = null;
+                    showConnectScreen(session, 'password');
+                    manager.updateUI();
                 }
-                return bytes;
-            } catch (e) {
-                return new Uint8Array(0);
-            }
+            });
+
+            fullscreenBtn.addEventListener('click', () => {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                } else {
+                    document.documentElement.requestFullscreen();
+                }
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                // Don't capture if in input (except terminal)
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                if (e.ctrlKey || e.metaKey) {
+                    // Ctrl+T: New tab
+                    if (e.key === 't') {
+                        e.preventDefault();
+                        showNewSessionDialog();
+                    }
+                    // Ctrl+W: Close tab
+                    else if (e.key === 'w') {
+                        e.preventDefault();
+                        const session = manager.getActiveSession();
+                        if (session && (manager.sessions.size > 1 || session.status !== 'connected')) {
+                            manager.removeSession(session.id);
+                            if (manager.sessions.size === 0) showNewSessionDialog();
+                        }
+                    }
+                    // Ctrl+1-9: Switch tabs
+                    else if (e.key >= '1' && e.key <= '9') {
+                        e.preventDefault();
+                        const idx = parseInt(e.key) - 1;
+                        const ids = Array.from(manager.sessions.keys());
+                        if (ids[idx]) manager.setActive(ids[idx]);
+                    }
+                    // Ctrl+Shift+R: Reconnect
+                    else if (e.key === 'R' && e.shiftKey) {
+                        e.preventDefault();
+                        reconnectBtn.click();
+                    }
+                }
+            });
+
+            // Show shortcuts hint on ?
+            document.addEventListener('keydown', (e) => {
+                if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+                    const hint = document.getElementById('shortcuts-hint');
+                    hint.classList.toggle('show');
+                    setTimeout(() => hint.classList.remove('show'), 3000);
+                }
+            });
         }
 
-        // Event listeners
-        codeConnectBtn.addEventListener('click', connectWithCode);
-        codeInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                if (codePasswordInput.value) connectWithCode();
-                else codePasswordInput.focus();
-            }
-        });
-        codePasswordInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') connectWithCode();
-        });
-
-        connectBtn.addEventListener('click', connect);
-        passwordInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') connect();
-        });
-
-        manualConnectBtn.addEventListener('click', manualConnect);
-        manualPasswordInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') manualConnect();
-        });
-
-        copyAnswerBtn.addEventListener('click', () => {
-            answerOutput.select();
-            document.execCommand('copy');
-            copyAnswerBtn.textContent = 'Copied!';
-            setTimeout(() => { copyAnswerBtn.textContent = 'Copy to Clipboard'; }, 2000);
-        });
-
-        showManualMode.addEventListener('click', () => {
-            codeForm.classList.add('hidden');
-            manualForm.classList.remove('hidden');
-            connectionMode = 'manual';
-        });
-
-        showCodeMode.addEventListener('click', () => {
-            manualForm.classList.add('hidden');
-            codeForm.classList.remove('hidden');
-            connectionMode = 'code';
-        });
-
-        document.getElementById('fullscreen-btn').addEventListener('click', () => {
-            if (document.fullscreenElement) {
-                document.exitFullscreen();
-            } else {
-                document.documentElement.requestFullscreen();
-            }
-        });
-
-        document.getElementById('disconnect-btn').addEventListener('click', () => {
-            if (dc) dc.close();
-            if (pc) pc.close();
-            window.location.reload();
-        });
-
-        // Initialize on load
+        // ============== Start ==============
         init();
     })();
     </script>

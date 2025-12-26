@@ -175,7 +175,7 @@ func (b *Bridge) HandleResize(rows, cols uint16) error {
 	return b.pty.Resize(rows, cols)
 }
 
-// Close stops the bridge
+// Close stops the bridge and closes the PTY
 func (b *Bridge) Close() error {
 	b.mu.Lock()
 	if b.closed {
@@ -187,4 +187,16 @@ func (b *Bridge) Close() error {
 	b.mu.Unlock()
 
 	return b.pty.Close()
+}
+
+// CloseWithoutPTY stops the bridge but keeps the PTY running for reconnection
+func (b *Bridge) CloseWithoutPTY() {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return
+	}
+	b.closed = true
+	close(b.done)
+	b.mu.Unlock()
 }
