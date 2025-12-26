@@ -16,6 +16,8 @@ import (
 	"github.com/artpar/terminal-tunnel/internal/signaling/relayserver"
 )
 
+// setSysProcAttr is defined in daemon_unix.go and daemon_windows.go
+
 var (
 	version = "0.1.0"
 )
@@ -172,10 +174,8 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	daemonCmd.Stderr = nil
 	daemonCmd.Stdin = nil
 
-	// Detach from parent process
-	daemonCmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
+	// Detach from parent process (platform-specific)
+	setSysProcAttr(daemonCmd)
 
 	if err := daemonCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start daemon: %w", err)
