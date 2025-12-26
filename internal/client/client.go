@@ -73,10 +73,11 @@ func (c *Client) call(method string, params interface{}) (*daemon.Response, erro
 }
 
 // StartSession starts a new terminal session
-func (c *Client) StartSession(password, shell string) (*daemon.StartSessionResult, error) {
+func (c *Client) StartSession(password, shell string, noTURN bool) (*daemon.StartSessionResult, error) {
 	params := daemon.StartSessionParams{
 		Password: password,
 		Shell:    shell,
+		NoTURN:   noTURN,
 	}
 
 	resp, err := c.call(daemon.MethodSessionStart, params)

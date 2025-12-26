@@ -26,6 +26,7 @@ type Options struct {
 	RelayURL string // WebSocket relay URL for signaling
 	NoRelay  bool   // Disable relay, use manual if UPnP fails
 	Manual   bool   // Force manual (QR/copy-paste) signaling mode
+	NoTURN   bool   // Disable TURN servers (P2P only, may fail with symmetric NAT)
 }
 
 // Callbacks for daemon integration
@@ -62,6 +63,7 @@ type Server struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	callbacks       Callbacks
+	webrtcConfig    ttwebrtc.Config
 }
 
 // NewServer creates a new terminal tunnel server
@@ -78,11 +80,20 @@ func NewServer(opts Options) (*Server, error) {
 	// Generate session ID
 	sessionID := generateSessionID()
 
+	// Configure WebRTC with TURN support
+	var webrtcConfig ttwebrtc.Config
+	if opts.NoTURN {
+		webrtcConfig = ttwebrtc.ConfigWithoutTURN()
+	} else {
+		webrtcConfig = ttwebrtc.DefaultConfig()
+	}
+
 	return &Server{
-		opts:      opts,
-		salt:      salt,
-		key:       key,
-		sessionID: sessionID,
+		opts:         opts,
+		salt:         salt,
+		key:          key,
+		sessionID:    sessionID,
+		webrtcConfig: webrtcConfig,
 	}, nil
 }
 
@@ -135,12 +146,19 @@ func (s *Server) Start(ctx ...context.Context) error {
 	sigMethod := s.determineSignalingMethod()
 	fmt.Printf("Using signaling method: %s\n", sigMethod)
 
+	// Display TURN configuration
+	if s.webrtcConfig.UseTURN {
+		fmt.Printf("✓ TURN relay enabled for symmetric NAT traversal\n")
+	} else {
+		fmt.Printf("⚠ TURN disabled (may fail with symmetric NAT)\n")
+	}
+
 	isFirstConnection := true
 
 	// Connection loop - allows reconnection
 	for {
-		// Create WebRTC peer
-		peer, err := ttwebrtc.NewPeer(ttwebrtc.DefaultConfig())
+		// Create WebRTC peer with configured ICE servers (STUN + optional TURN)
+		peer, err := ttwebrtc.NewPeer(s.webrtcConfig)
 		if err != nil {
 			return fmt.Errorf("failed to create peer: %w", err)
 		}

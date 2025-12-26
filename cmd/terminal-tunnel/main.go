@@ -126,6 +126,7 @@ var (
 	// Session start flags
 	password string
 	shell    string
+	noTURN   bool
 
 	// Relay flags
 	relayPort int
@@ -150,6 +151,7 @@ func init() {
 	// Start command flags
 	startCmd.Flags().StringVarP(&password, "password", "p", "", "Session password (auto-generated if not provided)")
 	startCmd.Flags().StringVarP(&shell, "shell", "s", "", "Shell to run (default: $SHELL or /bin/sh)")
+	startCmd.Flags().BoolVar(&noTURN, "no-turn", false, "Disable TURN relay (P2P only, may fail with symmetric NAT)")
 
 	// Relay command flags
 	relayCmd.Flags().IntVar(&relayPort, "port", 8765, "Port to listen on for WebSocket connections")
@@ -239,7 +241,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	result, err := c.StartSession(password, shell)
+	result, err := c.StartSession(password, shell, noTURN)
 	if err != nil {
 		return fmt.Errorf("failed to start session: %w", err)
 	}

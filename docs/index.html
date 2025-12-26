@@ -850,8 +850,19 @@
 
             session.pc = new RTCPeerConnection({
                 iceServers: [
+                    // STUN servers for public IP discovery
                     { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    // TURN servers for symmetric NAT traversal (OpenRelay free tier)
+                    {
+                        urls: [
+                            'turn:openrelay.metered.ca:80',
+                            'turn:openrelay.metered.ca:443',
+                            'turn:openrelay.metered.ca:443?transport=tcp'
+                        ],
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
+                    }
                 ]
             });
 

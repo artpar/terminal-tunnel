@@ -147,6 +147,7 @@ tt status          # Show daemon and session status
 |------|-------------|
 | `-p, --password` | Password for E2E encryption (auto-generated if not provided) |
 | `-s, --shell` | Shell to use (default: $SHELL or /bin/sh) |
+| `--no-turn` | Disable TURN relay (P2P only, may fail with symmetric NAT) |
 
 ### Relay Command
 
@@ -378,13 +379,42 @@ Argon2id(password, salt, time=3, memory=64MB, threads=4) → 256-bit key
 | STUN | Discovers public IP |
 | UPnP/NAT-PMP | Automatic port forwarding |
 | WebRTC ICE | Hole-punching for most NATs |
-| Relay | Signaling only, data stays P2P |
+| TURN | Relay for symmetric NAT (enabled by default) |
+| Signaling Relay | SDP exchange only, data stays P2P/TURN |
 
-### Limitations
+### TURN Servers
 
-- **Symmetric NAT on both sides**: May require TURN (not implemented)
-- **Strict firewalls**: May block UDP
-- **No TURN**: No data relay, keeps it truly P2P
+TURN (Traversal Using Relays around NAT) is enabled by default to handle symmetric NAT, which is common in:
+- Corporate networks
+- Mobile carriers (4G/5G)
+- Strict NAT routers
+
+The default TURN server is `openrelay.metered.ca` (free public TURN). You can configure custom TURN servers:
+
+```bash
+# Using environment variables
+export TURN_URL="turn:your-turn-server.com:3478"
+export TURN_USERNAME="username"
+export TURN_PASSWORD="password"
+
+# Or disable TURN (P2P only mode)
+tt start --no-turn -p mypassword
+```
+
+### Connection Modes
+
+| NAT Type | Method | Data Path |
+|----------|--------|-----------|
+| Open/Full Cone | STUN + ICE | Direct P2P |
+| Restricted Cone | STUN + ICE | Direct P2P |
+| Port Restricted | STUN + ICE | Direct P2P |
+| Symmetric NAT | TURN | Via TURN relay |
+
+### Notes
+
+- TURN relay traffic is still end-to-end encrypted (DTLS + NaCl SecretBox)
+- Signaling relay only handles ~2KB SDP exchange, not terminal traffic
+- With `--no-turn`, connections may fail if both sides have symmetric NAT
 
 ## Platform Support
 

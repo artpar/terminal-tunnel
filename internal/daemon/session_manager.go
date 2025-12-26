@@ -121,6 +121,7 @@ func (sm *SessionManager) StartSession(params StartSessionParams) (*SessionStart
 		Password: password,
 		Shell:    shell,
 		Timeout:  0, // No timeout for daemon-managed sessions
+		NoTURN:   params.NoTURN,
 	}
 
 	// Create context for this session

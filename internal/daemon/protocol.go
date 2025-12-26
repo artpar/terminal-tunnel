@@ -76,6 +76,7 @@ func NewSuccessResponse(id string, result interface{}) (*Response, error) {
 type StartSessionParams struct {
 	Password string `json:"password,omitempty"` // Auto-generated if empty
 	Shell    string `json:"shell,omitempty"`    // Default to $SHELL
+	NoTURN   bool   `json:"no_turn,omitempty"`  // Disable TURN relay (P2P only)
 }
 
 // StopSessionParams represents parameters for session.stop

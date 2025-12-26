@@ -4,6 +4,7 @@ package webrtc
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -11,25 +12,123 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+// TURN environment variables
+const (
+	EnvTURNURL      = "TURN_URL"
+	EnvTURNUsername = "TURN_USERNAME"
+	EnvTURNPassword = "TURN_PASSWORD"
+)
+
 // Default STUN servers for ICE candidate gathering
-var defaultICEServers = []webrtc.ICEServer{
-	{URLs: []string{
-		"stun:stun.l.google.com:19302",
-		"stun:stun1.l.google.com:19302",
-		"stun:stun2.l.google.com:19302",
-	}},
+var defaultSTUNServers = []string{
+	"stun:stun.l.google.com:19302",
+	"stun:stun1.l.google.com:19302",
+	"stun:stun2.l.google.com:19302",
+}
+
+// Default public TURN servers (OpenRelay - free tier)
+// These are fallback TURN servers for symmetric NAT traversal
+var defaultTURNServers = []TURNConfig{
+	{
+		URLs: []string{
+			"turn:openrelay.metered.ca:80",
+			"turn:openrelay.metered.ca:443",
+			"turn:openrelay.metered.ca:443?transport=tcp",
+		},
+		Username:   "openrelayproject",
+		Credential: "openrelayproject",
+	},
+}
+
+// TURNConfig holds TURN server credentials
+type TURNConfig struct {
+	URLs       []string
+	Username   string
+	Credential string
 }
 
 // Config holds peer connection configuration
 type Config struct {
-	ICEServers []webrtc.ICEServer
+	ICEServers  []webrtc.ICEServer
+	TURNServers []TURNConfig // Additional TURN servers
+	UseTURN     bool         // Enable TURN for symmetric NAT
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() Config {
 	return Config{
-		ICEServers: defaultICEServers,
+		ICEServers:  nil, // Built from STUN/TURN in NewPeer
+		TURNServers: nil, // Use defaults
+		UseTURN:     true, // Enable TURN by default for NAT traversal
 	}
+}
+
+// ConfigWithTURN returns configuration with custom TURN servers
+func ConfigWithTURN(turnServers []TURNConfig) Config {
+	return Config{
+		TURNServers: turnServers,
+		UseTURN:     true,
+	}
+}
+
+// ConfigWithoutTURN returns configuration without TURN (P2P only)
+func ConfigWithoutTURN() Config {
+	return Config{
+		UseTURN: false,
+	}
+}
+
+// GetTURNFromEnv returns TURN config from environment variables if set
+func GetTURNFromEnv() *TURNConfig {
+	turnURL := os.Getenv(EnvTURNURL)
+	if turnURL == "" {
+		return nil
+	}
+
+	username := os.Getenv(EnvTURNUsername)
+	password := os.Getenv(EnvTURNPassword)
+
+	return &TURNConfig{
+		URLs:       []string{turnURL},
+		Username:   username,
+		Credential: password,
+	}
+}
+
+// buildICEServers creates WebRTC ICE servers from config
+func buildICEServers(config Config) []webrtc.ICEServer {
+	servers := []webrtc.ICEServer{}
+
+	// Add STUN servers
+	servers = append(servers, webrtc.ICEServer{
+		URLs: defaultSTUNServers,
+	})
+
+	// Add TURN servers if enabled
+	if config.UseTURN {
+		turnConfigs := config.TURNServers
+
+		// Check environment variables first
+		if envTURN := GetTURNFromEnv(); envTURN != nil {
+			turnConfigs = []TURNConfig{*envTURN}
+		}
+
+		// Fall back to defaults if no custom TURN configured
+		if len(turnConfigs) == 0 {
+			turnConfigs = defaultTURNServers
+		}
+
+		for _, turn := range turnConfigs {
+			servers = append(servers, webrtc.ICEServer{
+				URLs:           turn.URLs,
+				Username:       turn.Username,
+				Credential:     turn.Credential,
+				CredentialType: webrtc.ICECredentialTypePassword,
+			})
+		}
+	}
+
+	return servers
 }
 
 // Peer wraps a WebRTC peer connection with helpers for terminal tunneling
@@ -47,12 +146,14 @@ type Peer struct {
 
 // NewPeer creates a new WebRTC peer connection
 func NewPeer(config Config) (*Peer, error) {
-	if len(config.ICEServers) == 0 {
-		config.ICEServers = defaultICEServers
+	// Build ICE servers from config (STUN + optional TURN)
+	iceServers := config.ICEServers
+	if len(iceServers) == 0 {
+		iceServers = buildICEServers(config)
 	}
 
 	peerConfig := webrtc.Configuration{
-		ICEServers: config.ICEServers,
+		ICEServers: iceServers,
 	}
 
 	pc, err := webrtc.NewPeerConnection(peerConfig)
