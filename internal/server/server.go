@@ -28,6 +28,14 @@ type Options struct {
 	Manual   bool   // Force manual (QR/copy-paste) signaling mode
 }
 
+// Callbacks for daemon integration
+type Callbacks struct {
+	OnShortCodeReady   func(code, clientURL string)
+	OnClientConnect    func()
+	OnClientDisconnect func()
+	OnPTYReady         func(ptyPath string, shellPID int)
+}
+
 // DefaultOptions returns sensible defaults
 func DefaultOptions() Options {
 	return Options{
@@ -53,6 +61,7 @@ type Server struct {
 	disconnected    chan bool
 	ctx             context.Context
 	cancel          context.CancelFunc
+	callbacks       Callbacks
 }
 
 // NewServer creates a new terminal tunnel server
@@ -77,30 +86,45 @@ func NewServer(opts Options) (*Server, error) {
 	}, nil
 }
 
+// New is an alias for NewServer (for daemon use)
+func New(opts Options) (*Server, error) {
+	return NewServer(opts)
+}
+
+// SetCallbacks sets the callbacks for daemon integration
+func (s *Server) SetCallbacks(cb Callbacks) {
+	s.callbacks = cb
+}
+
 // generateSessionID creates a unique session identifier
 func generateSessionID() string {
 	salt, _ := crypto.GenerateSalt()
 	return base64.RawURLEncoding.EncodeToString(salt)[:8]
 }
 
-// Start initializes and runs the terminal tunnel
-func (s *Server) Start() error {
+// Start initializes and runs the terminal tunnel (standalone mode)
+func (s *Server) Start(ctx ...context.Context) error {
 	s.disconnected = make(chan bool, 1)
 	saltB64 := base64.StdEncoding.EncodeToString(s.salt)
 
-	// Create cancellable context for graceful shutdown
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+	// Use provided context or create our own
+	if len(ctx) > 0 && ctx[0] != nil {
+		s.ctx, s.cancel = context.WithCancel(ctx[0])
+	} else {
+		// Create cancellable context for graceful shutdown
+		s.ctx, s.cancel = context.WithCancel(context.Background())
 
-	// Handle signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		// Handle signals only in standalone mode
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Cancel context on signal (allows blocking operations to exit)
-	go func() {
-		<-sigChan
-		fmt.Printf("\n\nShutting down...\n")
-		s.cancel()
-	}()
+		// Cancel context on signal (allows blocking operations to exit)
+		go func() {
+			<-sigChan
+			fmt.Printf("\n\nShutting down...\n")
+			s.cancel()
+		}()
+	}
 
 	// Determine signaling method once
 	sigMethod := s.determineSignalingMethod()
@@ -179,9 +203,15 @@ func (s *Server) Start() error {
 					return err
 				}
 				// Use context for cancellation support
-				ctx, cancel := context.WithTimeout(s.ctx, s.opts.Timeout)
-				answer, err = s.shortCodeClient.WaitForAnswerWithContext(ctx)
-				cancel()
+				var reconnCtx context.Context
+				var reconnCancel context.CancelFunc
+				if s.opts.Timeout > 0 {
+					reconnCtx, reconnCancel = context.WithTimeout(s.ctx, s.opts.Timeout)
+				} else {
+					reconnCtx, reconnCancel = context.WithCancel(s.ctx)
+				}
+				answer, err = s.shortCodeClient.WaitForAnswerWithContext(reconnCtx)
+				reconnCancel()
 				if err != nil && s.ctx.Err() != nil {
 					return s.Stop()
 				}
@@ -242,9 +272,19 @@ func (s *Server) Start() error {
 				return fmt.Errorf("failed to start PTY: %w", err)
 			}
 			s.pty = pty
+
+			// Invoke PTY ready callback
+			if s.callbacks.OnPTYReady != nil {
+				s.callbacks.OnPTYReady(pty.Name(), pty.PID())
+			}
 		}
 
 		fmt.Printf("✓ Terminal session active\n")
+
+		// Invoke client connect callback
+		if s.callbacks.OnClientConnect != nil {
+			s.callbacks.OnClientConnect()
+		}
 		fmt.Printf("\n")
 
 		// Create encrypted channel
@@ -266,6 +306,10 @@ func (s *Server) Start() error {
 
 		channel.OnClose(func() {
 			fmt.Printf("\n✓ Client disconnected\n")
+			// Invoke disconnect callback
+			if s.callbacks.OnClientDisconnect != nil {
+				s.callbacks.OnClientDisconnect()
+			}
 			select {
 			case s.disconnected <- true:
 			default:
@@ -523,6 +567,11 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 	fmt.Printf("  Password: %s\n", s.opts.Password)
 	fmt.Printf("\n")
 	fmt.Printf("  Or open: %s\n", clientURL)
+
+	// Invoke callback for short code ready
+	if s.callbacks.OnShortCodeReady != nil {
+		s.callbacks.OnShortCodeReady(code, clientURL)
+	}
 	fmt.Printf("\n")
 
 	// Generate small QR code for the URL (much smaller than full SDP!)
@@ -536,9 +585,16 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 	fmt.Printf("\n")
 
 	// Wait for answer via long-polling with context for cancellation
-	ctx, cancel := context.WithTimeout(s.ctx, s.opts.Timeout)
-	defer cancel()
-	answer, err := client.WaitForAnswerWithContext(ctx)
+	var waitCtx context.Context
+	var cancelWait context.CancelFunc
+	if s.opts.Timeout > 0 {
+		waitCtx, cancelWait = context.WithTimeout(s.ctx, s.opts.Timeout)
+	} else {
+		// No timeout - wait indefinitely (for daemon mode)
+		waitCtx, cancelWait = context.WithCancel(s.ctx)
+	}
+	defer cancelWait()
+	answer, err := client.WaitForAnswerWithContext(waitCtx)
 	if err != nil {
 		if s.ctx.Err() != nil {
 			return "", s.ctx.Err()

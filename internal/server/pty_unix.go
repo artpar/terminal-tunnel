@@ -76,6 +76,19 @@ func (p *PTY) Resize(rows, cols uint16) error {
 	})
 }
 
+// Name returns the PTY device path (e.g., /dev/pts/0)
+func (p *PTY) Name() string {
+	return p.ptmx.Name()
+}
+
+// PID returns the shell process PID
+func (p *PTY) PID() int {
+	if p.cmd != nil && p.cmd.Process != nil {
+		return p.cmd.Process.Pid
+	}
+	return 0
+}
+
 // Close closes the PTY and terminates the shell process
 func (p *PTY) Close() error {
 	p.mu.Lock()
