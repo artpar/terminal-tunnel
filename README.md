@@ -379,26 +379,23 @@ Argon2id(password, salt, time=3, memory=64MB, threads=4) → 256-bit key
 | STUN | Discovers public IP |
 | UPnP/NAT-PMP | Automatic port forwarding |
 | WebRTC ICE | Hole-punching for most NATs |
-| TURN | Relay for symmetric NAT (enabled by default) |
-| Signaling Relay | SDP exchange only, data stays P2P/TURN |
+| TURN | Relay for symmetric NAT (requires configuration) |
+| Signaling Relay | SDP exchange only, data stays P2P |
 
 ### TURN Servers
 
-TURN (Traversal Using Relays around NAT) is enabled by default to handle symmetric NAT, which is common in:
+TURN (Traversal Using Relays around NAT) is **not enabled by default**. Most connections work with STUN + ICE hole-punching. TURN is only needed for symmetric NAT, which is common in:
 - Corporate networks
 - Mobile carriers (4G/5G)
 - Strict NAT routers
 
-The default TURN server is `staticauth.openrelay.metered.ca` using ephemeral credentials. For reliable TURN in production, configure your own server:
+To enable TURN, configure your own server via environment variables:
 
 ```bash
-# Using environment variables (recommended for production)
 export TURN_URL="turn:your-turn-server.com:3478"
 export TURN_USERNAME="username"
 export TURN_PASSWORD="password"
-
-# Or disable TURN (P2P only mode)
-tt start --no-turn -p mypassword
+tt start -p mypassword
 ```
 
 **Self-hosted TURN (coturn):**
@@ -410,11 +407,13 @@ sudo apt install coturn
 listening-port=3478
 tls-listening-port=5349
 realm=yourdomain.com
-use-auth-secret
-static-auth-secret=your-secret-here
+lt-cred-mech
+user=myuser:mypassword
 
 # Start: turnserver
 ```
+
+**Paid TURN services:** [Twilio](https://www.twilio.com/stun-turn), [Xirsys](https://xirsys.com/), [Metered](https://www.metered.ca/)
 
 ### Connection Modes
 
