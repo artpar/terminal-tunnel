@@ -2,6 +2,53 @@
 
 P2P terminal sharing with end-to-end encryption. Share your terminal from anywhere - no signup, no relay servers, just direct encrypted connections.
 
+## Installation
+
+### One-Line Install (Linux/macOS)
+
+```bash
+curl -fsSL https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar -xz && sudo mv tt /usr/local/bin/
+```
+
+### Manual Install
+
+**Linux (x64)**
+```bash
+curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-linux-amd64.tar.gz
+tar -xzf tt-linux-amd64.tar.gz
+sudo mv tt /usr/local/bin/
+```
+
+**macOS (Apple Silicon)**
+```bash
+curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-arm64.tar.gz
+tar -xzf tt-darwin-arm64.tar.gz
+sudo mv tt /usr/local/bin/
+```
+
+**macOS (Intel)**
+```bash
+curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-amd64.tar.gz
+tar -xzf tt-darwin-amd64.tar.gz
+sudo mv tt /usr/local/bin/
+```
+
+**Windows** - Download from [Releases](https://github.com/artpar/terminal-tunnel/releases/latest), extract, and add to PATH.
+
+### From Source
+
+```bash
+go install github.com/artpar/terminal-tunnel/cmd/terminal-tunnel@latest
+```
+
+### All Platforms
+
+See [Releases](https://github.com/artpar/terminal-tunnel/releases/latest) for all available binaries:
+- Linux: amd64, arm64, armv7
+- macOS: amd64 (Intel), arm64 (Apple Silicon)
+- Windows: amd64, arm64
+- FreeBSD: amd64
+
 ## Features
 
 - **Zero setup** - Single binary, no dependencies
@@ -10,6 +57,7 @@ P2P terminal sharing with end-to-end encryption. Share your terminal from anywhe
 - **E2E encrypted** - Password-derived keys using Argon2id + NaCl SecretBox
 - **Cross-NAT** - Works across different networks with multiple fallback modes
 - **Mobile friendly** - Access from any device with a modern browser
+- **Session persistence** - Shell survives daemon restarts
 - **Web client** - Use the hosted client at [artpar.github.io/terminal-tunnel](https://artpar.github.io/terminal-tunnel/)
 
 ## Quick Start
@@ -43,25 +91,6 @@ tt stop XYZ789
 
 # Stop the daemon
 tt daemon stop
-```
-
-## Installation
-
-### From Releases
-
-Download from [Releases](https://github.com/artpar/terminal-tunnel/releases):
-
-```bash
-# Linux/macOS
-tar -xzf terminal-tunnel-*.tar.gz
-chmod +x tt
-sudo mv tt /usr/local/bin/
-```
-
-### From Source
-
-```bash
-go install github.com/artpar/terminal-tunnel/cmd/terminal-tunnel@latest
 ```
 
 ## Command Reference
