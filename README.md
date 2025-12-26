@@ -49,6 +49,36 @@ See [Releases](https://github.com/artpar/terminal-tunnel/releases/latest) for al
 - Windows: amd64, arm64
 - FreeBSD: amd64
 
+### Running as a Service (Optional)
+
+To auto-start the daemon on boot and auto-restart on crash:
+
+**Linux (systemd)**
+```bash
+# Download service file
+sudo curl -o /etc/systemd/system/terminal-tunnel@.service \
+  https://raw.githubusercontent.com/artpar/terminal-tunnel/main/services/terminal-tunnel.service
+
+# Enable and start for your user
+sudo systemctl enable --now terminal-tunnel@$USER
+
+# Check status
+sudo systemctl status terminal-tunnel@$USER
+```
+
+**macOS (launchd)**
+```bash
+# Download plist
+curl -o ~/Library/LaunchAgents/com.terminal-tunnel.daemon.plist \
+  https://raw.githubusercontent.com/artpar/terminal-tunnel/main/services/com.terminal-tunnel.daemon.plist
+
+# Load (starts immediately and on boot)
+launchctl load ~/Library/LaunchAgents/com.terminal-tunnel.daemon.plist
+
+# Check status
+launchctl list | grep terminal-tunnel
+```
+
 ## Features
 
 - **Zero setup** - Single binary, no dependencies
