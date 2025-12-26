@@ -1,7 +1,13 @@
 // Cloudflare Worker for terminal-tunnel relay
 // Deploy: wrangler deploy
+//
+// Environment variables (set in wrangler.toml or dashboard):
+//   CLIENT_URL - Web client URL (default: https://artpar.github.io/terminal-tunnel)
 
-const landingPage = `<!DOCTYPE html>
+const DEFAULT_CLIENT_URL = 'https://artpar.github.io/terminal-tunnel';
+
+function getLandingPage(clientUrl) {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -73,12 +79,13 @@ const landingPage = `<!DOCTYPE html>
     function go(e) {
       e.preventDefault();
       const code = document.getElementById('code').value.toUpperCase();
-      window.location.href = 'https://artpar.github.io/terminal-tunnel/?c=' + code;
+      window.location.href = '${clientUrl}/?c=' + code;
     }
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
   </script>
 </body>
 </html>`;
+}
 
 const manifest = JSON.stringify({
   name: 'Terminal Tunnel',
@@ -183,6 +190,9 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Get client URL from environment or use default
+    const clientUrl = env.CLIENT_URL || DEFAULT_CLIENT_URL;
+
     // CORS headers
     const corsHeaders = getCorsHeaders(request);
 
@@ -203,7 +213,7 @@ export default {
 
     // Landing page
     if (path === '/' || path === '') {
-      return new Response(landingPage, {
+      return new Response(getLandingPage(clientUrl), {
         headers: { 'Content-Type': 'text/html' }
       });
     }

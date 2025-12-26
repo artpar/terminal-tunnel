@@ -439,6 +439,55 @@ user=myuser:mypassword
 | FreeBSD amd64 | Full support |
 | Windows amd64/arm64 | Requires WSL |
 
+## Forking & Self-Hosting
+
+You can fork this repo and host your own web client and relay server.
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TT_RELAY_URL` | Relay server URL | `https://terminal-tunnel-relay.artpar.workers.dev` |
+| `TT_CLIENT_URL` | Web client URL | `https://artpar.github.io/terminal-tunnel` |
+
+### Self-Hosted Web Client
+
+1. Fork the repo on GitHub
+2. Enable GitHub Pages (Settings → Pages → Deploy from branch → `main` / `docs`)
+3. Your client will be at `https://yourusername.github.io/terminal-tunnel`
+4. Set the relay URL parameter: `?relay=https://your-relay.workers.dev`
+
+### Self-Hosted Relay (Cloudflare Worker)
+
+1. Fork the repo
+2. Create a Cloudflare account and install [Wrangler](https://developers.cloudflare.com/workers/wrangler/)
+3. Create a KV namespace:
+   ```bash
+   wrangler kv:namespace create SESSIONS
+   ```
+4. Update `relay-worker/wrangler.toml` with your KV namespace ID
+5. Set your web client URL:
+   ```toml
+   [vars]
+   CLIENT_URL = "https://yourusername.github.io/terminal-tunnel"
+   ```
+6. Deploy:
+   ```bash
+   cd relay-worker && wrangler deploy
+   ```
+
+### Using Your Fork
+
+```bash
+# Set environment variables to use your hosted services
+export TT_RELAY_URL="https://your-relay.workers.dev"
+export TT_CLIENT_URL="https://yourusername.github.io/terminal-tunnel"
+
+# Start session - will use your relay and show your web client URL
+tt daemon start
+tt start -p yourpassword
+```
+
 ## Building
 
 ```bash

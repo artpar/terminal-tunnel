@@ -422,7 +422,7 @@ func (s *Server) determineSignalingMethod() signaling.SignalingMethod {
 
 	// If no relay configured but not disabled, use default public relay
 	if !s.opts.NoRelay {
-		s.opts.RelayURL = signaling.DefaultRelayURL
+		s.opts.RelayURL = signaling.GetRelayURL()
 		return signaling.MethodShortCode
 	}
 
@@ -567,7 +567,7 @@ func (s *Server) startManualSignaling(offer string) (string, error) {
 // startShortCodeSignaling uses the relay HTTP API with short codes
 func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) {
 	// Create short code client and save for reconnection
-	client := signaling.NewShortCodeClient(s.opts.RelayURL, signaling.DefaultClientURL)
+	client := signaling.NewShortCodeClient(s.opts.RelayURL, signaling.GetClientURL())
 	s.shortCodeClient = client
 
 	// Create session and get short code

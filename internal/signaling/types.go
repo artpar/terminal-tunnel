@@ -1,6 +1,8 @@
 // Package signaling provides signaling mechanisms for WebRTC connection establishment
 package signaling
 
+import "os"
+
 // SignalingMethod represents the method used for SDP exchange
 type SignalingMethod int
 
@@ -30,11 +32,33 @@ func (m SignalingMethod) String() string {
 	}
 }
 
-// DefaultRelayURL is the public relay server (Cloudflare Worker)
-const DefaultRelayURL = "https://terminal-tunnel-relay.artpar.workers.dev"
+// Environment variable names for customization
+const (
+	EnvRelayURL  = "TT_RELAY_URL"
+	EnvClientURL = "TT_CLIENT_URL"
+)
 
-// DefaultClientURL is the public web client
-const DefaultClientURL = "https://artpar.github.io/terminal-tunnel"
+// Default URLs (used when environment variables are not set)
+const (
+	defaultRelayURL  = "https://terminal-tunnel-relay.artpar.workers.dev"
+	defaultClientURL = "https://artpar.github.io/terminal-tunnel"
+)
+
+// GetRelayURL returns the relay URL from environment or default
+func GetRelayURL() string {
+	if url := os.Getenv(EnvRelayURL); url != "" {
+		return url
+	}
+	return defaultRelayURL
+}
+
+// GetClientURL returns the web client URL from environment or default
+func GetClientURL() string {
+	if url := os.Getenv(EnvClientURL); url != "" {
+		return url
+	}
+	return defaultClientURL
+}
 
 // RelayMessage represents a message in the relay protocol
 type RelayMessage struct {

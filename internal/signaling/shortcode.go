@@ -94,7 +94,7 @@ func (c *ShortCodeClient) GetClientURL() string {
 	if c.clientURL != "" {
 		return fmt.Sprintf("%s/?c=%s", c.clientURL, c.code)
 	}
-	return fmt.Sprintf("%s/?c=%s", DefaultClientURL, c.code)
+	return fmt.Sprintf("%s/?c=%s", GetClientURL(), c.code)
 }
 
 // UpdateSession updates an existing session with a new offer (for reconnection)

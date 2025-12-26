@@ -373,6 +373,15 @@
         'use strict';
 
         const DEFAULT_RELAY_URL = 'https://terminal-tunnel-relay.artpar.workers.dev';
+
+        // Get relay URL from URL parameter or use default
+        // Usage: ?relay=https://your-relay.workers.dev
+        function getRelayURL() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('relay') || DEFAULT_RELAY_URL;
+        }
+        const RELAY_URL = getRelayURL();
+
         const STORAGE_KEY = 'tt_sessions';
         const MSG_DATA = 0x01, MSG_RESIZE = 0x02, MSG_PING = 0x03, MSG_PONG = 0x04, MSG_CLOSE = 0x05;
         const COMPACT_VERSION = 0x01, SALT_SIZE = 16;
@@ -401,7 +410,7 @@
                 this.id = id;
                 this.code = null;
                 this.name = null;
-                this.relayUrl = DEFAULT_RELAY_URL;
+                this.relayUrl = RELAY_URL;
                 this.connectionMode = 'code';
                 this.status = 'new'; // new, connecting, connected, disconnected
                 this.pc = null;
@@ -732,7 +741,7 @@
                     <div class="saved-sessions">
                         <h3>Recent Sessions</h3>
                         ${manager.savedSessions.map(s => `
-                            <div class="saved-session" data-code="${escapeHtml(s.code)}" data-name="${escapeHtml(s.name || '')}" data-relay="${escapeHtml(s.relayUrl || DEFAULT_RELAY_URL)}">
+                            <div class="saved-session" data-code="${escapeHtml(s.code)}" data-name="${escapeHtml(s.name || '')}" data-relay="${escapeHtml(s.relayUrl || RELAY_URL)}">
                                 <span class="session-name">${escapeHtml(s.name || s.code)}</span>
                                 <span class="session-code">${escapeHtml(s.code)}</span>
                                 <span class="session-delete" data-action="delete">&times;</span>
