@@ -138,6 +138,15 @@ function isExpired(createdAt) {
 }
 
 export default {
+  // Scheduled cleanup of expired sessions (runs hourly via cron)
+  async scheduled(event, env, ctx) {
+    const cutoff = Math.floor(Date.now() / 1000) - EXPIRY_SECONDS;
+    const result = await env.DB.prepare(
+      'DELETE FROM sessions WHERE created_at < ?'
+    ).bind(cutoff).run();
+    console.log(`Cleanup: deleted ${result.meta.changes} expired sessions`);
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
