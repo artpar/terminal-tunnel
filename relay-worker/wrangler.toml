@@ -7,9 +7,9 @@ binding = "DB"
 database_name = "terminal-tunnel-sessions"
 database_id = "cad6878e-ff6b-4454-8284-6b9c04d6abd7"
 
-# Cleanup expired sessions every hour
+# Cleanup expired sessions daily at midnight UTC
 [triggers]
-crons = ["0 * * * *"]
+crons = ["0 0 * * *"]
 
 # Optional: Set custom web client URL for forked deployments
 # Uncomment and modify to point to your hosted web client
