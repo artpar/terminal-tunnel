@@ -57,3 +57,7 @@ func (b *Bridge) HandleData(data []byte) error         { return ErrWindowsNotSup
 func (b *Bridge) HandleResize(rows, cols uint16) error { return ErrWindowsNotSupported }
 func (b *Bridge) Close() error                         { return io.ErrClosedPipe }
 func (b *Bridge) CloseWithoutPTY()                     {}
+func (b *Bridge) AddViewerSend(send func([]byte) error)   {}
+func (b *Bridge) ClearViewerSends()                       {}
+func (b *Bridge) SetRecorder(recorder func([]byte) error) {}
+func (b *Bridge) SetLocalOutput(w io.Writer)              {}
