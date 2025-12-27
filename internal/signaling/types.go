@@ -40,7 +40,7 @@ const (
 
 // Default URLs (used when environment variables are not set)
 const (
-	defaultRelayURL  = "https://terminal-tunnel-relay.fly.dev"
+	defaultRelayURL  = "https://terminal-tunnel-relay.artpar.workers.dev"
 	defaultClientURL = "https://artpar.github.io/terminal-tunnel"
 )
 
