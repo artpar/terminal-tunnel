@@ -193,198 +193,211 @@ export default {
     // Get client URL from environment or use default
     const clientUrl = env.CLIENT_URL || DEFAULT_CLIENT_URL;
 
-    // CORS headers
+    // CORS headers - must be available for error responses too
     const corsHeaders = getCorsHeaders(request);
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // Rate limiting for API endpoints (not landing page)
-    if (path.startsWith('/session')) {
-      const allowed = await checkRateLimit(request, env);
-      if (!allowed) {
-        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
-          status: 429,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+    try {
+      // Rate limiting for API endpoints (not landing page)
+      if (path.startsWith('/session')) {
+        const allowed = await checkRateLimit(request, env);
+        if (!allowed) {
+          return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
       }
-    }
 
-    // Landing page
-    if (path === '/' || path === '') {
-      return new Response(getLandingPage(clientUrl), {
-        headers: { 'Content-Type': 'text/html' }
-      });
-    }
-
-    // PWA manifest
-    if (path === '/manifest.json') {
-      return new Response(manifest, {
-        headers: { 'Content-Type': 'application/manifest+json' }
-      });
-    }
-
-    // Service worker
-    if (path === '/sw.js') {
-      return new Response(serviceWorker, {
-        headers: { 'Content-Type': 'application/javascript' }
-      });
-    }
-
-    // Health check
-    if (path === '/health') {
-      return new Response('OK', { headers: corsHeaders });
-    }
-
-    // POST /session - create new session
-    if (path === '/session' && request.method === 'POST') {
-      const { sdp, salt, viewer_sdp, viewer_key } = await request.json();
-      if (!sdp) {
-        return new Response(JSON.stringify({ error: 'SDP required' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      // Landing page
+      if (path === '/' || path === '') {
+        return new Response(getLandingPage(clientUrl), {
+          headers: { 'Content-Type': 'text/html' }
         });
       }
 
-      const code = generateCode();
-      await env.SESSIONS.put(code, JSON.stringify({ sdp, salt, answer: null }), {
-        expirationTtl: EXPIRY_SECONDS
-      });
+      // PWA manifest
+      if (path === '/manifest.json') {
+        return new Response(manifest, {
+          headers: { 'Content-Type': 'application/manifest+json' }
+        });
+      }
 
-      const response = { code, expires_in: EXPIRY_SECONDS };
+      // Service worker
+      if (path === '/sw.js') {
+        return new Response(serviceWorker, {
+          headers: { 'Content-Type': 'application/javascript' }
+        });
+      }
 
-      // If viewer session requested, create it with V suffix
-      if (viewer_sdp && viewer_key) {
-        const viewerCode = code + 'V';
-        await env.SESSIONS.put(viewerCode, JSON.stringify({
-          sdp: viewer_sdp,
-          key: viewer_key,
-          read_only: true,
-          answer: null
-        }), {
+      // Health check
+      if (path === '/health') {
+        return new Response('OK', { headers: corsHeaders });
+      }
+
+      // POST /session - create new session
+      if (path === '/session' && request.method === 'POST') {
+        const { sdp, salt, viewer_sdp, viewer_key } = await request.json();
+        if (!sdp) {
+          return new Response(JSON.stringify({ error: 'SDP required' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const code = generateCode();
+        await env.SESSIONS.put(code, JSON.stringify({ sdp, salt, answer: null }), {
           expirationTtl: EXPIRY_SECONDS
         });
-        response.viewer_code = viewerCode;
-      }
 
-      return new Response(JSON.stringify(response), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
+        const response = { code, expires_in: EXPIRY_SECONDS };
 
-    // GET /session/{code} - get session SDP
-    const sessionMatch = path.match(/^\/session\/([A-Z0-9]+)$/i);
-    if (sessionMatch && request.method === 'GET') {
-      const code = sessionMatch[1].toUpperCase();
-      const data = await env.SESSIONS.get(code);
+        // If viewer session requested, create it with V suffix
+        if (viewer_sdp && viewer_key) {
+          const viewerCode = code + 'V';
+          await env.SESSIONS.put(viewerCode, JSON.stringify({
+            sdp: viewer_sdp,
+            key: viewer_key,
+            read_only: true,
+            answer: null
+          }), {
+            expirationTtl: EXPIRY_SECONDS
+          });
+          response.viewer_code = viewerCode;
+        }
 
-      if (!data) {
-        return new Response(JSON.stringify({ error: 'Session not found' }), {
-          status: 404,
+        return new Response(JSON.stringify(response), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
-      const session = JSON.parse(data);
+      // GET /session/{code} - get session SDP
+      const sessionMatch = path.match(/^\/session\/([A-Z0-9]+)$/i);
+      if (sessionMatch && request.method === 'GET') {
+        const code = sessionMatch[1].toUpperCase();
+        const data = await env.SESSIONS.get(code);
 
-      // Check if this is a viewer session (code ends with V)
-      if (session.read_only) {
-        // Viewer session - return key instead of salt
+        if (!data) {
+          return new Response(JSON.stringify({ error: 'Session not found' }), {
+            status: 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const session = JSON.parse(data);
+
+        // Check if this is a viewer session (code ends with V)
+        if (session.read_only) {
+          // Viewer session - return key instead of salt
+          return new Response(JSON.stringify({
+            sdp: session.sdp,
+            key: session.key,
+            read_only: true,
+            used: session.answer !== null
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Normal control session
         return new Response(JSON.stringify({
           sdp: session.sdp,
-          key: session.key,
-          read_only: true,
+          salt: session.salt,
           used: session.answer !== null
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
-      // Normal control session
+      // PUT /session/{code} - update session (for reconnection)
+      const updateMatch = path.match(/^\/session\/([A-Z0-9]+)$/i);
+      if (updateMatch && request.method === 'PUT') {
+        const code = updateMatch[1].toUpperCase();
+        const { sdp, salt } = await request.json();
+
+        const existing = await env.SESSIONS.get(code);
+        if (!existing) {
+          return new Response(JSON.stringify({ error: 'Session not found' }), {
+            status: 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Update session with new offer, clear answer
+        await env.SESSIONS.put(code, JSON.stringify({ sdp, salt, answer: null }), {
+          expirationTtl: EXPIRY_SECONDS
+        });
+
+        return new Response(JSON.stringify({ status: 'ok' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // POST /session/{code}/answer - submit answer
+      const answerPostMatch = path.match(/^\/session\/([A-Z0-9]+)\/answer$/i);
+      if (answerPostMatch && request.method === 'POST') {
+        const code = answerPostMatch[1].toUpperCase();
+        const { sdp } = await request.json();
+
+        const data = await env.SESSIONS.get(code);
+        if (!data) {
+          return new Response(JSON.stringify({ error: 'Session not found' }), {
+            status: 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const session = JSON.parse(data);
+        session.answer = sdp;
+        await env.SESSIONS.put(code, JSON.stringify(session), {
+          expirationTtl: EXPIRY_SECONDS
+        });
+
+        return new Response(JSON.stringify({ status: 'ok' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // GET /session/{code}/answer - poll for answer
+      const answerGetMatch = path.match(/^\/session\/([A-Z0-9]+)\/answer$/i);
+      if (answerGetMatch && request.method === 'GET') {
+        const code = answerGetMatch[1].toUpperCase();
+        const data = await env.SESSIONS.get(code);
+
+        if (!data) {
+          return new Response(JSON.stringify({ error: 'Session not found' }), {
+            status: 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const session = JSON.parse(data);
+        if (session.answer) {
+          return new Response(JSON.stringify({ sdp: session.answer }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        return new Response(JSON.stringify({ status: 'waiting' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      return new Response('Not found', { status: 404, headers: corsHeaders });
+
+    } catch (error) {
+      // Always return CORS headers on errors so browser can read error message
+      console.error('Worker error:', error.message, error.stack);
       return new Response(JSON.stringify({
-        sdp: session.sdp,
-        salt: session.salt,
-        used: session.answer !== null
+        error: 'Internal server error',
+        message: error.message
       }), {
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    // PUT /session/{code} - update session (for reconnection)
-    const updateMatch = path.match(/^\/session\/([A-Z0-9]+)$/i);
-    if (updateMatch && request.method === 'PUT') {
-      const code = updateMatch[1].toUpperCase();
-      const { sdp, salt } = await request.json();
-
-      const existing = await env.SESSIONS.get(code);
-      if (!existing) {
-        return new Response(JSON.stringify({ error: 'Session not found' }), {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      // Update session with new offer, clear answer
-      await env.SESSIONS.put(code, JSON.stringify({ sdp, salt, answer: null }), {
-        expirationTtl: EXPIRY_SECONDS
-      });
-
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // POST /session/{code}/answer - submit answer
-    const answerPostMatch = path.match(/^\/session\/([A-Z0-9]+)\/answer$/i);
-    if (answerPostMatch && request.method === 'POST') {
-      const code = answerPostMatch[1].toUpperCase();
-      const { sdp } = await request.json();
-
-      const data = await env.SESSIONS.get(code);
-      if (!data) {
-        return new Response(JSON.stringify({ error: 'Session not found' }), {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      const session = JSON.parse(data);
-      session.answer = sdp;
-      await env.SESSIONS.put(code, JSON.stringify(session), {
-        expirationTtl: EXPIRY_SECONDS
-      });
-
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // GET /session/{code}/answer - poll for answer
-    const answerGetMatch = path.match(/^\/session\/([A-Z0-9]+)\/answer$/i);
-    if (answerGetMatch && request.method === 'GET') {
-      const code = answerGetMatch[1].toUpperCase();
-      const data = await env.SESSIONS.get(code);
-
-      if (!data) {
-        return new Response(JSON.stringify({ error: 'Session not found' }), {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      const session = JSON.parse(data);
-      if (session.answer) {
-        return new Response(JSON.stringify({ sdp: session.answer }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      return new Response(JSON.stringify({ status: 'waiting' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    return new Response('Not found', { status: 404, headers: corsHeaders });
   }
 };

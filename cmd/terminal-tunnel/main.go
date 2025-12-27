@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
 
 	"github.com/artpar/terminal-tunnel/internal/client"
@@ -303,6 +304,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 	fmt.Println()
+
+	// Generate QR code for the client URL
+	if result.ClientURL != "" {
+		qr, err := qrcode.New(result.ClientURL, qrcode.Low)
+		if err == nil {
+			fmt.Print(qr.ToSmallString(false))
+		}
+	}
 
 	return nil
 }
