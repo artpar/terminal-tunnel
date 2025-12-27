@@ -226,7 +226,8 @@ func (ec *EncryptedChannel) StartKeepalive() <-chan struct{} {
 		return ec.pongCheckDone
 	}
 
-	ec.pingTicker = time.NewTicker(PingInterval)
+	ticker := time.NewTicker(PingInterval)
+	ec.pingTicker = ticker
 	ec.pongCheckDone = make(chan struct{})
 	ec.lastPongTime = time.Now()
 	ec.mu.Unlock()
@@ -239,7 +240,7 @@ func (ec *EncryptedChannel) StartKeepalive() <-chan struct{} {
 			select {
 			case <-ec.pongCheckDone:
 				return
-			case <-ec.pingTicker.C:
+			case <-ticker.C: // Use local variable to avoid race with StopKeepalive
 				// Send ping
 				ec.mu.Lock()
 				closed := ec.closed
