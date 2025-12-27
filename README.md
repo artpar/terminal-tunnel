@@ -2,41 +2,31 @@
 
 P2P terminal sharing with end-to-end encryption. Share your terminal from anywhere - no signup, no relay servers, just direct encrypted connections.
 
-## Installation
-
-### One-Line Install (Linux/macOS)
-
-```bash
-curl -fsSL https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar -xz && sudo mv tt /usr/local/bin/
-```
-
-### Manual Install
-
-**Linux (x64)**
-```bash
-curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-linux-amd64.tar.gz
-tar -xzf tt-linux-amd64.tar.gz
-sudo mv tt /usr/local/bin/
-```
+## Install
 
 **macOS (Apple Silicon)**
 ```bash
-curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-arm64.tar.gz
-tar -xzf tt-darwin-arm64.tar.gz
-sudo mv tt /usr/local/bin/
+curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-arm64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
 ```
 
 **macOS (Intel)**
 ```bash
-curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-amd64.tar.gz
-tar -xzf tt-darwin-amd64.tar.gz
-sudo mv tt /usr/local/bin/
+curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-amd64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
 ```
 
-**Windows** - Download from [Releases](https://github.com/artpar/terminal-tunnel/releases/latest), extract, and add to PATH.
+**Linux (x64)**
+```bash
+curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-linux-amd64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
+```
 
-### From Source
+**Linux (ARM64)**
+```bash
+curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-linux-arm64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
+```
 
+**Windows** - Download from [Releases](https://github.com/artpar/terminal-tunnel/releases/latest), extract, add to PATH.
+
+**Go**
 ```bash
 go install github.com/artpar/terminal-tunnel/cmd/terminal-tunnel@latest
 ```
@@ -457,23 +447,28 @@ You can fork this repo and host your own web client and relay server.
 3. Your client will be at `https://yourusername.github.io/terminal-tunnel`
 4. Set the relay URL parameter: `?relay=https://your-relay.workers.dev`
 
-### Self-Hosted Relay (Cloudflare Worker)
+### Self-Hosted Relay (Cloudflare Worker + D1)
 
 1. Fork the repo
 2. Create a Cloudflare account and install [Wrangler](https://developers.cloudflare.com/workers/wrangler/)
-3. Create a KV namespace:
+3. Create a D1 database:
    ```bash
-   wrangler kv:namespace create SESSIONS
+   cd relay-worker
+   wrangler d1 create terminal-tunnel-sessions
    ```
-4. Update `relay-worker/wrangler.toml` with your KV namespace ID
-5. Set your web client URL:
+4. Update `relay-worker/wrangler.toml` with your D1 database ID
+5. Create the sessions table:
+   ```bash
+   wrangler d1 execute terminal-tunnel-sessions --remote --command "CREATE TABLE sessions (code TEXT PRIMARY KEY, sdp TEXT, salt TEXT, key TEXT, answer TEXT, read_only INTEGER DEFAULT 0, created_at INTEGER)"
+   ```
+6. Set your web client URL (optional):
    ```toml
    [vars]
    CLIENT_URL = "https://yourusername.github.io/terminal-tunnel"
    ```
-6. Deploy:
+7. Deploy:
    ```bash
-   cd relay-worker && wrangler deploy
+   wrangler deploy
    ```
 
 ### Using Your Fork
