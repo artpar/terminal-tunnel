@@ -179,6 +179,7 @@ type Bridge struct {
 	send        func([]byte) error
 	viewerSends []func([]byte) error // Additional send functions for viewers (read-only)
 	recorder    func([]byte) error   // Optional recording callback
+	localOutput io.Writer            // Optional local output (for interactive mode)
 	done        chan struct{}
 	closed      bool
 	mu          sync.Mutex
@@ -212,6 +213,13 @@ func (b *Bridge) SetRecorder(recorder func([]byte) error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.recorder = recorder
+}
+
+// SetLocalOutput sets a local output writer (for interactive/SSH-like mode)
+func (b *Bridge) SetLocalOutput(w io.Writer) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.localOutput = w
 }
 
 // Start begins reading from the PTY and sending to the channel
@@ -255,6 +263,10 @@ func (b *Bridge) readLoop() {
 			// Record if recorder is set (best effort - don't fail on recording errors)
 			if b.recorder != nil {
 				b.recorder(data)
+			}
+			// Write to local output if set (for interactive mode)
+			if b.localOutput != nil {
+				b.localOutput.Write(data)
 			}
 			b.mu.Unlock()
 		}

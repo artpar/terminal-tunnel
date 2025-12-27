@@ -1,20 +1,27 @@
 package main
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/base32"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/artpar/terminal-tunnel/internal/client"
 	"github.com/artpar/terminal-tunnel/internal/daemon"
 	"github.com/artpar/terminal-tunnel/internal/recording"
+	"github.com/artpar/terminal-tunnel/internal/server"
 	"github.com/artpar/terminal-tunnel/internal/signaling/relayserver"
 )
 
@@ -79,12 +86,13 @@ var startCmd = &cobra.Command{
 	Short: "Start a new terminal session",
 	Long: `Start a new terminal sharing session.
 
-The daemon will:
-1. Create a PTY with your shell
-2. Register with the signaling relay
-3. Display a URL and short code for clients
-4. Wait for a client to connect
-5. Bridge the terminal to the encrypted data channel`,
+By default, runs interactively (like SSH):
+1. Shows connection code and QR
+2. Waits for client to connect
+3. You use your terminal, client sees it too
+4. Ctrl+C ends the session
+
+Use --detach (-d) for background mode via daemon.`,
 	RunE: runStart,
 }
 
@@ -154,6 +162,7 @@ var (
 	noTURN   bool
 	public   bool
 	record   bool
+	detach   bool // Run in background via daemon
 
 	// Relay flags
 	relayPort int
@@ -188,6 +197,7 @@ func init() {
 	startCmd.Flags().BoolVar(&noTURN, "no-turn", false, "Disable TURN relay (P2P only, may fail with symmetric NAT)")
 	startCmd.Flags().BoolVar(&public, "public", false, "Enable public viewer mode (read-only viewers without password)")
 	startCmd.Flags().BoolVar(&record, "record", false, "Record session to ~/.tt/recordings/")
+	startCmd.Flags().BoolVarP(&detach, "detach", "d", false, "Run session in background (via daemon)")
 
 	// Relay command flags
 	relayCmd.Flags().IntVar(&relayPort, "port", 8765, "Port to listen on for WebSocket connections")
@@ -272,6 +282,17 @@ func runDaemonForeground(cmd *cobra.Command, args []string) error {
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
+	// If detach mode, use daemon
+	if detach {
+		return runStartDetached()
+	}
+
+	// Interactive mode - run server directly
+	return runStartInteractive()
+}
+
+// runStartDetached runs session via daemon (background mode)
+func runStartDetached() error {
 	c := client.NewClient()
 
 	// Check if daemon is running
@@ -285,35 +306,191 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start session: %w", err)
 	}
 
-	fmt.Printf("\nSession started:\n")
-	fmt.Printf("  ID:         %s\n", result.ID)
-	if result.ShortCode != "" {
-		fmt.Printf("  Code:       %s\n", result.ShortCode)
-	}
+	fmt.Printf("\nSession started (detached):\n")
+	fmt.Printf("  Code:       %s\n", result.ShortCode)
 	fmt.Printf("  Password:   %s\n", result.Password)
 	if result.ClientURL != "" {
-		fmt.Printf("  Control URL: %s\n", result.ClientURL)
+		fmt.Printf("  URL:        %s\n", result.ClientURL)
 	}
-	fmt.Printf("  Status:     %s\n", result.Status)
 
-	// Display viewer info if public mode
 	if result.Public && result.ViewerCode != "" {
-		fmt.Printf("\n  Viewer Code: %s (read-only, no password)\n", result.ViewerCode)
-		if result.ViewerURL != "" {
-			fmt.Printf("  Viewer URL:  %s\n", result.ViewerURL)
-		}
+		fmt.Printf("  Viewer:     %s (read-only)\n", result.ViewerCode)
 	}
 	fmt.Println()
 
-	// Generate QR code for the client URL
 	if result.ClientURL != "" {
-		qr, err := qrcode.New(result.ClientURL, qrcode.Low)
-		if err == nil {
+		qr, _ := qrcode.New(result.ClientURL, qrcode.Low)
+		if qr != nil {
 			fmt.Print(qr.ToSmallString(false))
 		}
 	}
 
+	fmt.Printf("\nSession running in background. Use 'tt stop %s' to end.\n", result.ShortCode)
 	return nil
+}
+
+// runStartInteractive runs session in foreground with attached terminal (SSH-like)
+func runStartInteractive() error {
+	// Generate password if not provided
+	sessionPassword := password
+	if sessionPassword == "" {
+		sessionPassword = generatePassword()
+	}
+
+	// Validate password length
+	if len(sessionPassword) < 12 {
+		return fmt.Errorf("password must be at least 12 characters")
+	}
+
+	// Create server options
+	opts := server.Options{
+		Password: sessionPassword,
+		Shell:    shell,
+		Timeout:  0, // No timeout for interactive
+		NoTURN:   noTURN,
+		Public:   public,
+		Record:   record,
+	}
+
+	// Create server
+	srv, err := server.NewServer(opts)
+	if err != nil {
+		return fmt.Errorf("failed to create server: %w", err)
+	}
+
+	// Track connection state
+	var shortCode string
+	_ = shortCode // Used in callbacks
+	var oldState *term.State
+	stdinFd := int(os.Stdin.Fd())
+	isTerminal := term.IsTerminal(stdinFd)
+
+	// Channel to signal when input goroutine should stop
+	inputDone := make(chan struct{})
+
+	// Set callbacks
+	srv.SetCallbacks(server.Callbacks{
+		OnShortCodeReady: func(code, url string) {
+			shortCode = code
+
+			// Clear screen and show connection info
+			fmt.Print("\033[2J\033[H") // Clear screen
+			fmt.Printf("╔══════════════════════════════════════════════════╗\n")
+			fmt.Printf("║           Terminal Tunnel - Ready                ║\n")
+			fmt.Printf("╠══════════════════════════════════════════════════╣\n")
+			fmt.Printf("║  Code:     %-38s║\n", code)
+			fmt.Printf("║  Password: %-38s║\n", sessionPassword)
+			fmt.Printf("╚══════════════════════════════════════════════════╝\n\n")
+
+			if url != "" {
+				qr, _ := qrcode.New(url, qrcode.Low)
+				if qr != nil {
+					fmt.Print(qr.ToSmallString(false))
+				}
+				fmt.Printf("\n  %s\n", url)
+			}
+
+			fmt.Printf("\n  Waiting for client to connect...\n")
+			fmt.Printf("  Press Ctrl+C to cancel\n\n")
+		},
+		OnClientConnect: func() {
+			// Don't clear screen - keep connection info visible briefly
+		},
+		OnClientDisconnect: func() {
+			// Client disconnected - restore terminal and show message
+			if oldState != nil {
+				term.Restore(stdinFd, oldState)
+			}
+			fmt.Printf("\r\n⚠ Client disconnected.\r\n")
+		},
+		OnBridgeReady: func(bridge *server.Bridge) {
+			// Client connected - enter interactive mode
+			fmt.Print("\033[2J\033[H") // Clear screen
+
+			// Set up local output (PTY output -> stdout)
+			bridge.SetLocalOutput(os.Stdout)
+
+			// Put terminal in raw mode for interactive I/O
+			if isTerminal {
+				var err error
+				oldState, err = term.MakeRaw(stdinFd)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: couldn't set raw mode: %v\n", err)
+				}
+			}
+
+			// Forward stdin to PTY
+			go func() {
+				buf := make([]byte, 1024)
+				for {
+					select {
+					case <-inputDone:
+						return
+					default:
+					}
+
+					n, err := os.Stdin.Read(buf)
+					if err != nil {
+						if err != io.EOF {
+							// Ignore read errors during shutdown
+						}
+						return
+					}
+					if n > 0 {
+						bridge.HandleData(buf[:n])
+					}
+				}
+			}()
+		},
+	})
+
+	// Set up context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Restore terminal on exit
+	defer func() {
+		close(inputDone)
+		if oldState != nil {
+			term.Restore(stdinFd, oldState)
+		}
+	}()
+
+	// Handle signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Run server in background
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- srv.Start(ctx)
+	}()
+
+	// Wait for signal or server exit
+	select {
+	case <-sigChan:
+		if oldState != nil {
+			term.Restore(stdinFd, oldState)
+		}
+		fmt.Printf("\r\n\r\nShutting down...\r\n")
+		cancel()
+		srv.Stop()
+	case err := <-serverDone:
+		if err != nil && err != context.Canceled {
+			return err
+		}
+	}
+
+	fmt.Printf("Session ended.\r\n")
+	return nil
+}
+
+// generatePassword creates a random 16-character password
+func generatePassword() string {
+	bytes := make([]byte, 10)
+	rand.Read(bytes)
+	// Use base32 for readable password (no confusing chars like 0/O, 1/l)
+	return strings.ToLower(base32.StdEncoding.EncodeToString(bytes)[:16])
 }
 
 func runStop(cmd *cobra.Command, args []string) error {

@@ -176,8 +176,8 @@ async function checkRateLimit(request, env) {
     return false;
   }
 
-  // TTL = time remaining in window + buffer
-  const ttl = RATE_LIMIT_WINDOW - (now % RATE_LIMIT_WINDOW) + 10;
+  // TTL = time remaining in window + buffer (min 60s for KV)
+  const ttl = Math.max(60, RATE_LIMIT_WINDOW - (now % RATE_LIMIT_WINDOW) + 60);
   await env.SESSIONS.put(key, String(count + 1), {
     expirationTtl: ttl
   });

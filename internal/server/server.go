@@ -42,6 +42,7 @@ type Callbacks struct {
 	OnViewerConnect    func() // For public viewer connections
 	OnViewerDisconnect func()
 	OnPTYReady         func(ptyPath string, shellPID int)
+	OnBridgeReady      func(bridge *Bridge) // Called when bridge is ready for local I/O
 }
 
 // DefaultOptions returns sensible defaults
@@ -137,6 +138,16 @@ func (s *Server) SetCallbacks(cb Callbacks) {
 // SetPTY sets an existing PTY for session recovery (reattachment after daemon restart)
 func (s *Server) SetPTY(pty *PTY) {
 	s.pty = pty
+}
+
+// GetPTY returns the PTY (may be nil if not started yet)
+func (s *Server) GetPTY() *PTY {
+	return s.pty
+}
+
+// GetBridge returns the Bridge (may be nil if not connected)
+func (s *Server) GetBridge() *Bridge {
+	return s.bridge
 }
 
 // generateSessionID creates a unique session identifier
@@ -368,6 +379,11 @@ func (s *Server) Start(ctx ...context.Context) error {
 		// Attach recorder to bridge if recording is enabled
 		if s.recorder != nil {
 			bridge.SetRecorder(s.recorder.WriteOutput)
+		}
+
+		// Invoke bridge ready callback for interactive mode
+		if s.callbacks.OnBridgeReady != nil {
+			s.callbacks.OnBridgeReady(bridge)
 		}
 
 		// Handle incoming data
@@ -723,23 +739,27 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 
 	clientURL := client.GetClientURL()
 
-	// Display connection info
-	fmt.Printf("\n")
-	fmt.Printf("═══════════════════════════════════════════════════\n")
-	fmt.Printf("  Terminal Tunnel Ready!\n")
-	fmt.Printf("═══════════════════════════════════════════════════\n")
-	fmt.Printf("\n")
-	fmt.Printf("  Code: %s\n", code)
-	fmt.Printf("  Password: %s\n", s.opts.Password)
-	fmt.Printf("\n")
-	fmt.Printf("  Or open: %s\n", clientURL)
+	// Display connection info (skip if CLI is handling display via callback)
+	if s.callbacks.OnShortCodeReady == nil {
+		fmt.Printf("\n")
+		fmt.Printf("═══════════════════════════════════════════════════\n")
+		fmt.Printf("  Terminal Tunnel Ready!\n")
+		fmt.Printf("═══════════════════════════════════════════════════\n")
+		fmt.Printf("\n")
+		fmt.Printf("  Code: %s\n", code)
+		fmt.Printf("  Password: %s\n", s.opts.Password)
+		fmt.Printf("\n")
+		fmt.Printf("  Or open: %s\n", clientURL)
+	}
 
 	// Display viewer info if public mode
 	if s.opts.Public && viewerCode != "" {
 		viewerURL := client.GetViewerURL()
-		fmt.Printf("\n")
-		fmt.Printf("  Viewer Code: %s (read-only, no password)\n", viewerCode)
-		fmt.Printf("  Viewer URL:  %s\n", viewerURL)
+		if s.callbacks.OnShortCodeReady == nil {
+			fmt.Printf("\n")
+			fmt.Printf("  Viewer Code: %s (read-only, no password)\n", viewerCode)
+			fmt.Printf("  Viewer URL:  %s\n", viewerURL)
+		}
 
 		// Invoke callback for viewer code ready
 		if s.callbacks.OnViewerCodeReady != nil {
@@ -751,17 +771,18 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 	if s.callbacks.OnShortCodeReady != nil {
 		s.callbacks.OnShortCodeReady(code, clientURL)
 	}
-	fmt.Printf("\n")
 
-	// Generate small QR code for the URL (much smaller than full SDP!)
-	qr, err := qrcode.New(clientURL, qrcode.Low)
-	if err == nil {
-		fmt.Print(qr.ToSmallString(false))
+	// Display QR code and waiting message (skip if CLI is handling display)
+	if s.callbacks.OnShortCodeReady == nil {
+		fmt.Printf("\n")
+		qr, err := qrcode.New(clientURL, qrcode.Low)
+		if err == nil {
+			fmt.Print(qr.ToSmallString(false))
+		}
+		fmt.Printf("\n")
+		fmt.Printf("  Waiting for connection... (Ctrl+C to cancel)\n")
+		fmt.Printf("\n")
 	}
-
-	fmt.Printf("\n")
-	fmt.Printf("  Waiting for connection... (Ctrl+C to cancel)\n")
-	fmt.Printf("\n")
 
 	// Wait for answer via long-polling with context for cancellation
 	var waitCtx context.Context
