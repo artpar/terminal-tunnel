@@ -1,0 +1,20 @@
+# Maintainer: artpar <artpar@gmail.com>
+pkgname=terminal-tunnel-bin
+pkgver=1.4.1
+pkgrel=1
+pkgdesc="P2P terminal sharing with E2E encryption"
+arch=('x86_64' 'aarch64')
+url="https://github.com/artpar/terminal-tunnel"
+license=('MIT')
+provides=('terminal-tunnel' 'tt')
+conflicts=('terminal-tunnel')
+
+source_x86_64=("https://github.com/artpar/terminal-tunnel/releases/download/v${pkgver}/tt-linux-amd64.tar.gz")
+source_aarch64=("https://github.com/artpar/terminal-tunnel/releases/download/v${pkgver}/tt-linux-arm64.tar.gz")
+
+sha256sums_x86_64=('4aca59fead5ac921b6415321a4730b96b4f652f6ad7c079b64340031702425be')
+sha256sums_aarch64=('d26e47c5aee205d6c83e905b63710e0007785ba239adc3ef3ee3eb885f924a91')
+
+package() {
+    install -Dm755 "${srcdir}/tt" "${pkgdir}/usr/bin/tt"
+}

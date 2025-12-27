@@ -7,7 +7,7 @@ LDFLAGS=-s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)
 BUILD_DIR=build
 DIST_DIR=dist
 
-.PHONY: all build clean test build-all release install
+.PHONY: all build clean test build-all release install packages
 
 all: build
 
@@ -96,6 +96,27 @@ release: build-all
 	@echo "Checksums:"
 	@cat $(DIST_DIR)/checksums-sha256.txt
 
+# Build Linux packages (DEB, RPM, APK) using nfpm
+packages: build-all
+	@which nfpm > /dev/null || (echo "nfpm not found. Install: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest" && exit 1)
+	mkdir -p $(DIST_DIR)
+
+	# AMD64 packages (use envsubst for variable expansion in nfpm.yaml)
+	GOARCH=amd64 VERSION=$(VERSION) envsubst < nfpm.yaml > /tmp/nfpm-amd64.yaml
+	nfpm pkg --config /tmp/nfpm-amd64.yaml --packager deb --target $(DIST_DIR)/tt_$(VERSION)_amd64.deb
+	nfpm pkg --config /tmp/nfpm-amd64.yaml --packager rpm --target $(DIST_DIR)/tt-$(VERSION).x86_64.rpm
+	nfpm pkg --config /tmp/nfpm-amd64.yaml --packager apk --target $(DIST_DIR)/tt_$(VERSION)_x86_64.apk
+
+	# ARM64 packages
+	GOARCH=arm64 VERSION=$(VERSION) envsubst < nfpm.yaml > /tmp/nfpm-arm64.yaml
+	nfpm pkg --config /tmp/nfpm-arm64.yaml --packager deb --target $(DIST_DIR)/tt_$(VERSION)_arm64.deb
+	nfpm pkg --config /tmp/nfpm-arm64.yaml --packager rpm --target $(DIST_DIR)/tt-$(VERSION).aarch64.rpm
+	nfpm pkg --config /tmp/nfpm-arm64.yaml --packager apk --target $(DIST_DIR)/tt_$(VERSION)_aarch64.apk
+
+	@echo ""
+	@echo "Packages built in $(DIST_DIR)/"
+	@ls -lh $(DIST_DIR)/*.deb $(DIST_DIR)/*.rpm $(DIST_DIR)/*.apk 2>/dev/null || true
+
 # Install locally
 install: build
 	sudo cp $(BINARY_NAME) /usr/local/bin/
@@ -124,6 +145,7 @@ help:
 	@echo "  build      Build for current platform"
 	@echo "  build-all  Build for all platforms (static)"
 	@echo "  release    Create release archives with checksums"
+	@echo "  packages   Build DEB/RPM/APK packages (requires nfpm)"
 	@echo "  test       Run tests"
 	@echo "  install    Install to /usr/local/bin"
 	@echo "  uninstall  Remove from /usr/local/bin"

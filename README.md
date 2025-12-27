@@ -4,6 +4,45 @@ P2P terminal sharing with end-to-end encryption. Share your terminal from anywhe
 
 ## Install
 
+### Package Managers (Recommended)
+
+**macOS / Linux (Homebrew)**
+```bash
+brew install artpar/tap/tt
+```
+
+**Windows (Scoop)**
+```powershell
+scoop bucket add artpar https://github.com/artpar/scoop-bucket
+scoop install terminal-tunnel
+```
+
+**Arch Linux (AUR)**
+```bash
+yay -S terminal-tunnel-bin
+# or: paru -S terminal-tunnel-bin
+```
+
+**Debian / Ubuntu**
+```bash
+curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_1.4.1_amd64.deb
+sudo dpkg -i tt_1.4.1_amd64.deb
+```
+
+**Fedora / RHEL / Rocky Linux**
+```bash
+curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-1.4.1.x86_64.rpm
+sudo rpm -i tt-1.4.1.x86_64.rpm
+```
+
+**Alpine Linux**
+```bash
+curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_1.4.1_x86_64.apk
+sudo apk add --allow-untrusted tt_1.4.1_x86_64.apk
+```
+
+### Manual Install
+
 **macOS (Apple Silicon)**
 ```bash
 curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-arm64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
@@ -33,11 +72,14 @@ go install github.com/artpar/terminal-tunnel/cmd/terminal-tunnel@latest
 
 ### All Platforms
 
-See [Releases](https://github.com/artpar/terminal-tunnel/releases/latest) for all available binaries:
-- Linux: amd64, arm64, armv7
-- macOS: amd64 (Intel), arm64 (Apple Silicon)
-- Windows: amd64, arm64
-- FreeBSD: amd64
+See [Releases](https://github.com/artpar/terminal-tunnel/releases/latest) for all available binaries and packages:
+
+| Platform | Architectures | Formats |
+|----------|---------------|---------|
+| Linux | amd64, arm64, armv7 | tar.gz, .deb, .rpm, .apk |
+| macOS | amd64, arm64 | tar.gz, Homebrew |
+| Windows | amd64, arm64 | .zip, Scoop |
+| FreeBSD | amd64 | tar.gz |
 
 ### Running as a Service (Optional)
 

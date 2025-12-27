@@ -1,0 +1,25 @@
+name: terminal-tunnel
+arch: ${GOARCH}
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: artpar <artpar@gmail.com>
+description: P2P terminal sharing with E2E encryption
+vendor: artpar
+homepage: https://github.com/artpar/terminal-tunnel
+license: MIT
+
+contents:
+  - src: ./build/tt-linux-${GOARCH}
+    dst: /usr/bin/tt
+    file_info:
+      mode: 0755
+
+overrides:
+  deb:
+    depends: []
+  rpm:
+    depends: []
+  apk:
+    depends: []
