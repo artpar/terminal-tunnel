@@ -157,7 +157,7 @@ function getCorsHeaders(request) {
   // The security is in the short code + password, not CORS
   return {
     'Access-Control-Allow-Origin': origin || '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 }
@@ -328,6 +328,30 @@ export default {
 
         // Update session with new offer, clear answer
         await env.SESSIONS.put(code, JSON.stringify({ sdp, salt, answer: null }), {
+          expirationTtl: EXPIRY_SECONDS
+        });
+
+        return new Response(JSON.stringify({ status: 'ok' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // PATCH /session/{code} - heartbeat (keep session alive)
+      const heartbeatMatch = path.match(/^\/session\/([A-Z0-9]+)$/i);
+      if (heartbeatMatch && request.method === 'PATCH') {
+        const code = heartbeatMatch[1].toUpperCase();
+
+        const existing = await env.SESSIONS.get(code);
+        if (!existing) {
+          return new Response(JSON.stringify({ error: 'Session not found' }), {
+            status: 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Re-save with fresh TTL to extend expiration
+        const session = JSON.parse(existing);
+        await env.SESSIONS.put(code, JSON.stringify(session), {
           expirationTtl: EXPIRY_SECONDS
         });
 

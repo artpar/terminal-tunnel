@@ -118,16 +118,17 @@ var upgrader = websocket.Upgrader{
 
 // Session represents a signaling session between host and client
 type Session struct {
-	ID         string
-	ShortCode  string
-	HostConn   *websocket.Conn
-	ClientConn *websocket.Conn
-	Offer      string
-	Answer     string
-	Salt       string
-	Created    time.Time
-	AnswerChan chan string // Channel to notify host of answer
-	mu         sync.Mutex
+	ID           string
+	ShortCode    string
+	HostConn     *websocket.Conn
+	ClientConn   *websocket.Conn
+	Offer        string
+	Answer       string
+	Salt         string
+	Created      time.Time
+	LastActivity time.Time // Last activity time for expiry calculation
+	AnswerChan   chan string // Channel to notify host of answer
+	mu           sync.Mutex
 }
 
 // SessionRequest is the request body for creating a session
@@ -218,7 +219,7 @@ func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
 		// For non-browser clients, allow all
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 	}
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
@@ -228,6 +229,7 @@ func (rs *RelayServer) SetPublicURL(url string) {
 }
 
 // cleanupLoop periodically removes expired sessions
+// Sessions expire based on LastActivity, not creation time
 func (rs *RelayServer) cleanupLoop() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
@@ -236,7 +238,11 @@ func (rs *RelayServer) cleanupLoop() {
 		rs.mu.Lock()
 		now := time.Now()
 		for id, session := range rs.sessions {
-			if now.Sub(session.Created) > rs.expiration {
+			session.mu.Lock()
+			timeSinceActivity := now.Sub(session.LastActivity)
+			session.mu.Unlock()
+
+			if timeSinceActivity > rs.expiration {
 				session.mu.Lock()
 				if session.HostConn != nil {
 					session.HostConn.Close()
@@ -252,7 +258,7 @@ func (rs *RelayServer) cleanupLoop() {
 				if session.ShortCode != "" {
 					delete(rs.shortCodes, session.ShortCode)
 				}
-				log.Printf("Session %s expired", id)
+				log.Printf("Session %s expired (inactive for %v)", id, timeSinceActivity.Round(time.Second))
 			}
 		}
 		rs.mu.Unlock()
@@ -468,13 +474,15 @@ func (rs *RelayServer) HandleCreateSession(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	now := time.Now()
 	session := &Session{
-		ID:         code,
-		ShortCode:  code,
-		Offer:      req.SDP,
-		Salt:       req.Salt,
-		Created:    time.Now(),
-		AnswerChan: make(chan string, 1),
+		ID:           code,
+		ShortCode:    code,
+		Offer:        req.SDP,
+		Salt:         req.Salt,
+		Created:      now,
+		LastActivity: now,
+		AnswerChan:   make(chan string, 1),
 	}
 	rs.sessions[code] = session
 	rs.shortCodes[code] = session
@@ -530,6 +538,8 @@ func (rs *RelayServer) HandleGetSession(w http.ResponseWriter, r *http.Request) 
 	}
 
 	session.mu.Lock()
+	// Update last activity on access
+	session.LastActivity = time.Now()
 	resp := SessionInfo{
 		SDP:  session.Offer,
 		Salt: session.Salt,
@@ -538,6 +548,111 @@ func (rs *RelayServer) HandleGetSession(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// HandleSessionHeartbeat handles PATCH /session/{code} - keeps session alive
+func (rs *RelayServer) HandleSessionHeartbeat(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract code from path: /session/ABC123
+	path := strings.TrimPrefix(r.URL.Path, "/session/")
+	code := strings.ToUpper(path)
+
+	rs.mu.RLock()
+	session, exists := rs.shortCodes[code]
+	rs.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	session.mu.Lock()
+	session.LastActivity = time.Now()
+	session.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// HandleUpdateSession handles PUT /session/{code} - updates session SDP for reconnection
+func (rs *RelayServer) HandleUpdateSession(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Rate limiting
+	clientIP := getClientIP(r)
+	if !rs.rateLimiter.Allow(clientIP) {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
+	// Extract code from path: /session/ABC123
+	path := strings.TrimPrefix(r.URL.Path, "/session/")
+	code := strings.ToUpper(path)
+
+	var req SessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.SDP == "" {
+		http.Error(w, "SDP required", http.StatusBadRequest)
+		return
+	}
+
+	rs.mu.RLock()
+	session, exists := rs.shortCodes[code]
+	rs.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	session.mu.Lock()
+	session.Offer = req.SDP
+	if req.Salt != "" {
+		session.Salt = req.Salt
+	}
+	session.Answer = "" // Clear old answer for new connection
+	session.LastActivity = time.Now()
+
+	// Create new answer channel for the new connection
+	if session.AnswerChan != nil {
+		select {
+		case <-session.AnswerChan: // Drain if anything there
+		default:
+		}
+	} else {
+		session.AnswerChan = make(chan string, 1)
+	}
+	session.mu.Unlock()
+
+	log.Printf("Session %s updated for reconnection from IP %s", code, clientIP)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // HandleSubmitAnswer handles POST /session/{code}/answer - submits answer SDP
@@ -666,6 +781,15 @@ func (rs *RelayServer) HandlePollAnswer(w http.ResponseWriter, r *http.Request) 
 
 // sessionHandler routes /session/* requests
 func (rs *RelayServer) sessionHandler(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w, r)
+
+	// Handle preflight for all session endpoints
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	path := r.URL.Path
 
 	// POST /session - create new session
@@ -676,11 +800,23 @@ func (rs *RelayServer) sessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	// /session/{code}/answer
 	if strings.HasSuffix(path, "/answer") {
-		if r.Method == http.MethodPost || r.Method == http.MethodOptions {
+		if r.Method == http.MethodPost {
 			rs.HandleSubmitAnswer(w, r)
 		} else {
 			rs.HandlePollAnswer(w, r)
 		}
+		return
+	}
+
+	// PUT /session/{code} - update session for reconnection
+	if r.Method == http.MethodPut {
+		rs.HandleUpdateSession(w, r)
+		return
+	}
+
+	// PATCH /session/{code} - heartbeat to keep session alive
+	if r.Method == http.MethodPatch {
+		rs.HandleSessionHeartbeat(w, r)
 		return
 	}
 

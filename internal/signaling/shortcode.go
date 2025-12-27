@@ -188,6 +188,31 @@ func (c *ShortCodeClient) UpdateSession(sdp, salt string) error {
 	return nil
 }
 
+// SendHeartbeat sends a heartbeat to keep the session alive on the relay
+func (c *ShortCodeClient) SendHeartbeat() error {
+	if c.code == "" {
+		return fmt.Errorf("no session code")
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, c.relayURL+"/session/"+c.code, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send heartbeat: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("relay returned error: %s", string(bodyBytes))
+	}
+
+	return nil
+}
+
 // WaitForAnswer polls the relay for an answer with context support
 func (c *ShortCodeClient) WaitForAnswer(timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

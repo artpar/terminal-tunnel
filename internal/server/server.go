@@ -53,6 +53,10 @@ func DefaultOptions() Options {
 	}
 }
 
+// Relay heartbeat interval (keeps session alive on relay)
+// Set to 4 minutes (session TTL is 5 min) to minimize KV operations
+const relayHeartbeatInterval = 4 * time.Minute
+
 // Server orchestrates the terminal tunnel
 type Server struct {
 	opts            Options
@@ -82,6 +86,9 @@ type Server struct {
 
 	// Recording support
 	recorder *recording.Recorder
+
+	// Relay heartbeat
+	heartbeatStop chan struct{}
 }
 
 // NewServer creates a new terminal tunnel server
@@ -417,6 +424,11 @@ func (s *Server) Start(ctx ...context.Context) error {
 		// Start keepalive monitoring (server sends pings, expects pongs)
 		keepaliveTimeout := channel.StartKeepalive()
 
+		// Start relay heartbeat on first connection (keeps session alive on relay)
+		if isFirstConnection {
+			s.startRelayHeartbeat()
+		}
+
 		isFirstConnection = false
 
 		// Wait for disconnection, keepalive timeout, or termination
@@ -465,6 +477,7 @@ func (s *Server) cleanupConnection() {
 
 // Stop gracefully shuts down the server
 func (s *Server) Stop() error {
+	s.stopRelayHeartbeat()
 	if s.bridge != nil {
 		s.bridge.Close()
 	}
@@ -500,6 +513,47 @@ func (s *Server) Stop() error {
 		fmt.Printf("✓ Recording saved: %s (duration: %v)\n", path, duration.Round(time.Second))
 	}
 	return nil
+}
+
+// startRelayHeartbeat starts a goroutine to periodically send heartbeats to keep the relay session alive
+func (s *Server) startRelayHeartbeat() {
+	if s.shortCodeClient == nil {
+		return
+	}
+
+	s.heartbeatStop = make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(relayHeartbeatInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-s.heartbeatStop:
+				return
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.shortCodeClient.SendHeartbeat(); err != nil {
+					// Log but don't fail - session might still work
+					fmt.Printf("⚠ Relay heartbeat failed: %v\n", err)
+				}
+			}
+		}
+	}()
+}
+
+// stopRelayHeartbeat stops the relay heartbeat goroutine
+func (s *Server) stopRelayHeartbeat() {
+	if s.heartbeatStop != nil {
+		select {
+		case <-s.heartbeatStop:
+			// Already closed
+		default:
+			close(s.heartbeatStop)
+		}
+		s.heartbeatStop = nil
+	}
 }
 
 // determineSignalingMethod decides which signaling method to use
