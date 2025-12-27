@@ -173,41 +173,41 @@ nfpms:
       rpm:
         dependencies: []
 
-# Homebrew tap - disabled until HOMEBREW_TAP_GITHUB_TOKEN is configured
-# brews:
-#   - name: tt
-#     repository:
-#       owner: artpar
-#       name: homebrew-tap
-#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-#     directory: Formula
-#     homepage: https://github.com/artpar/terminal-tunnel
-#     description: P2P terminal sharing with E2E encryption
-#     license: MIT
-#     install: |
-#       bin.install "tt"
-#     test: |
-#       system "#{bin}/tt", "--version"
-#     commit_author:
-#       name: goreleaserbot
-#       email: bot@goreleaser.com
-#     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+# Homebrew tap
+brews:
+  - name: tt
+    repository:
+      owner: artpar
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/artpar/terminal-tunnel
+    description: P2P terminal sharing with E2E encryption
+    license: MIT
+    install: |
+      bin.install "tt"
+    test: |
+      system "#{bin}/tt", "--version"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
 
-# Scoop bucket (Windows) - disabled until SCOOP_BUCKET_GITHUB_TOKEN is configured
-# scoops:
-#   - name: terminal-tunnel
-#     repository:
-#       owner: artpar
-#       name: scoop-bucket
-#       token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
-#     directory: bucket
-#     homepage: https://github.com/artpar/terminal-tunnel
-#     description: P2P terminal sharing with E2E encryption
-#     license: MIT
-#     commit_author:
-#       name: goreleaserbot
-#       email: bot@goreleaser.com
-#     commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
+# Scoop bucket (Windows)
+scoops:
+  - name: terminal-tunnel
+    repository:
+      owner: artpar
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    directory: bucket
+    homepage: https://github.com/artpar/terminal-tunnel
+    description: P2P terminal sharing with E2E encryption
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
 
 # Chocolatey (Windows) - disabled, needs Windows runner
 # See .github/workflows/release.yml chocolatey job instead
@@ -236,6 +236,19 @@ release:
   header: |
     ## Installation
 
+    ### Package Managers
+    ```bash
+    # macOS/Linux (Homebrew)
+    brew install artpar/tap/tt
+
+    # Windows (Scoop)
+    scoop bucket add artpar https://github.com/artpar/scoop-bucket
+    scoop install terminal-tunnel
+
+    # Snap
+    snap install terminal-tunnel
+    ```
+
     ### Linux Packages
     ```bash
     # Debian/Ubuntu
@@ -254,8 +267,6 @@ release:
     ```
 
     ### Direct Download
-    Download the appropriate archive for your platform from the assets below.
-
     ```bash
     # macOS (Apple Silicon)
     curl -L https://github.com/artpar/terminal-tunnel/releases/download/v{{ .Version }}/terminal-tunnel_{{ .Version }}_darwin_arm64.tar.gz | tar xz
