@@ -1208,22 +1208,53 @@
         // ============== Crypto ==============
         // Flag to track if we're using PBKDF2 fallback (for status display)
         let usingPbkdf2Fallback = false;
+        let argon2Available = false;
 
-        async function deriveKey(password, saltBytes) {
+        // Check if argon2 is usable (WASM may be blocked by CSP)
+        async function checkArgon2() {
             try {
-                // Try Argon2 WASM first (most secure)
-                const result = await argon2.hash({
-                    pass: password, salt: saltBytes,
-                    time: 3, mem: 65536, parallelism: 4, hashLen: 32,
+                if (typeof argon2 === 'undefined' || !argon2.hash) {
+                    return false;
+                }
+                // Try a minimal hash to verify WASM works
+                await argon2.hash({
+                    pass: 'test', salt: new Uint8Array(16),
+                    time: 1, mem: 1024, parallelism: 1, hashLen: 32,
                     type: argon2.ArgonType.Argon2id
                 });
-                return new Uint8Array(result.hash);
-            } catch (argonError) {
-                console.warn('Argon2 failed (CSP may block WASM), using PBKDF2 fallback:', argonError.message);
-                usingPbkdf2Fallback = true;
-                // Fallback to PBKDF2 (Web Crypto API - works everywhere)
-                return await deriveKeyPbkdf2(password, saltBytes);
+                return true;
+            } catch (e) {
+                console.warn('Argon2 not available:', e.message);
+                return false;
             }
+        }
+
+        async function deriveKey(password, saltBytes) {
+            // Check argon2 availability once
+            if (!usingPbkdf2Fallback && !argon2Available) {
+                argon2Available = await checkArgon2();
+                if (!argon2Available) {
+                    console.warn('Argon2 WASM blocked by CSP, using PBKDF2 fallback');
+                    usingPbkdf2Fallback = true;
+                }
+            }
+
+            if (argon2Available) {
+                try {
+                    const result = await argon2.hash({
+                        pass: password, salt: saltBytes,
+                        time: 3, mem: 65536, parallelism: 4, hashLen: 32,
+                        type: argon2.ArgonType.Argon2id
+                    });
+                    return new Uint8Array(result.hash);
+                } catch (argonError) {
+                    console.warn('Argon2 failed, using PBKDF2 fallback:', argonError.message);
+                    usingPbkdf2Fallback = true;
+                }
+            }
+
+            // Fallback to PBKDF2 (Web Crypto API - works everywhere)
+            return await deriveKeyPbkdf2(password, saltBytes);
         }
 
         async function deriveKeyPbkdf2(password, saltBytes) {
