@@ -1,0 +1,38 @@
+name: terminal-tunnel
+base: core22
+version: '1.4.1'
+summary: P2P terminal sharing with E2E encryption
+description: |
+  Share your terminal from anywhere - no signup, no relay servers,
+  just direct encrypted connections.
+
+  Features:
+  - Zero setup - Single binary, no dependencies
+  - Fully P2P - Direct WebRTC connection
+  - E2E encrypted - Password-derived keys using Argon2id + NaCl SecretBox
+  - Cross-NAT - Works across different networks
+  - Web client - Access from any browser
+
+grade: stable
+confinement: classic
+
+architectures:
+  - build-on: amd64
+  - build-on: arm64
+
+apps:
+  tt:
+    command: bin/tt
+
+parts:
+  terminal-tunnel:
+    plugin: go
+    source: .
+    source-type: local
+    build-snaps:
+      - go/1.22/stable
+    build-environment:
+      - CGO_ENABLED: "0"
+    override-build: |
+      go build -ldflags="-s -w -X main.version=${SNAPCRAFT_PROJECT_VERSION}" \
+        -o $SNAPCRAFT_PART_INSTALL/bin/tt ./cmd/terminal-tunnel
