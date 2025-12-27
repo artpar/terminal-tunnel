@@ -23,10 +23,15 @@ yay -S terminal-tunnel-bin
 # or: paru -S terminal-tunnel-bin
 ```
 
-**Debian / Ubuntu**
+**Snap (Linux)**
 ```bash
-curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_1.4.1_amd64.deb
-sudo dpkg -i tt_1.4.1_amd64.deb
+sudo snap install terminal-tunnel
+```
+
+**Debian / Ubuntu (APT)**
+```bash
+echo "deb [trusted=yes] https://artpar.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/terminal-tunnel.list
+sudo apt update && sudo apt install terminal-tunnel
 ```
 
 **Fedora / RHEL / Rocky Linux**
@@ -76,7 +81,7 @@ See [Releases](https://github.com/artpar/terminal-tunnel/releases/latest) for al
 
 | Platform | Architectures | Formats |
 |----------|---------------|---------|
-| Linux | amd64, arm64, armv7 | tar.gz, .deb, .rpm, .apk |
+| Linux | amd64, arm64, armv7 | tar.gz, .deb, .rpm, .apk, Snap |
 | macOS | amd64, arm64 | tar.gz, Homebrew |
 | Windows | amd64, arm64 | .zip, Scoop |
 | FreeBSD | amd64 | tar.gz |
