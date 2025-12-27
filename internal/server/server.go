@@ -65,6 +65,7 @@ type Server struct {
 	channel         *ttwebrtc.EncryptedChannel
 	salt            []byte
 	key             [32]byte
+	pbkdf2Key       [32]byte // PBKDF2 fallback key for CSP-restricted browsers
 	sessionID       string
 	upnpClose       func() error
 	disconnected    chan bool
@@ -91,8 +92,9 @@ func NewServer(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
 
-	// Derive encryption key
+	// Derive encryption keys (Argon2 primary, PBKDF2 fallback for CSP-restricted browsers)
 	key := crypto.DeriveKey(opts.Password, salt)
+	pbkdf2Key := crypto.DeriveKeyPBKDF2(opts.Password, salt)
 
 	// Generate session ID
 	sessionID := generateSessionID()
@@ -109,6 +111,7 @@ func NewServer(opts Options) (*Server, error) {
 		opts:         opts,
 		salt:         salt,
 		key:          key,
+		pbkdf2Key:    pbkdf2Key,
 		sessionID:    sessionID,
 		webrtcConfig: webrtcConfig,
 	}
@@ -368,8 +371,9 @@ func (s *Server) Start(ctx ...context.Context) error {
 		}
 		fmt.Printf("\n")
 
-		// Create encrypted channel
+		// Create encrypted channel with PBKDF2 fallback for CSP-restricted browsers
 		channel := ttwebrtc.NewEncryptedChannel(dc, &s.key)
+		channel.SetAltKey(&s.pbkdf2Key)
 		s.channel = channel
 
 		// Create bridge

@@ -1206,31 +1206,36 @@
         }
 
         // ============== Crypto ==============
+        // Flag to track if we're using PBKDF2 fallback (for status display)
+        let usingPbkdf2Fallback = false;
+
         async function deriveKey(password, saltBytes) {
             try {
-                // Try WASM first (faster)
+                // Try Argon2 WASM first (most secure)
                 const result = await argon2.hash({
                     pass: password, salt: saltBytes,
                     time: 3, mem: 65536, parallelism: 4, hashLen: 32,
                     type: argon2.ArgonType.Argon2id
                 });
                 return new Uint8Array(result.hash);
-            } catch (wasmError) {
-                console.warn('WASM Argon2 failed, trying asm.js fallback:', wasmError.message);
-                try {
-                    // Fallback to asm.js mode (slower but works without WASM)
-                    const result = await argon2.hash({
-                        pass: password, salt: saltBytes,
-                        time: 3, mem: 65536, parallelism: 4, hashLen: 32,
-                        type: argon2.ArgonType.Argon2id,
-                        wasmMemory: null // Force asm.js
-                    });
-                    return new Uint8Array(result.hash);
-                } catch (asmError) {
-                    console.error('Argon2 failed completely:', asmError);
-                    throw new Error('Key derivation failed - browser may not support required crypto');
-                }
+            } catch (argonError) {
+                console.warn('Argon2 failed (CSP may block WASM), using PBKDF2 fallback:', argonError.message);
+                usingPbkdf2Fallback = true;
+                // Fallback to PBKDF2 (Web Crypto API - works everywhere)
+                return await deriveKeyPbkdf2(password, saltBytes);
             }
+        }
+
+        async function deriveKeyPbkdf2(password, saltBytes) {
+            const encoder = new TextEncoder();
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']
+            );
+            const derivedBits = await crypto.subtle.deriveBits(
+                { name: 'PBKDF2', salt: saltBytes, iterations: 600000, hash: 'SHA-256' },
+                keyMaterial, 256
+            );
+            return new Uint8Array(derivedBits);
         }
 
         async function encrypt(session, data) {

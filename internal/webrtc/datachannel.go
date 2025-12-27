@@ -20,8 +20,9 @@ const (
 
 // EncryptedChannel wraps a WebRTC DataChannel with encryption and protocol handling
 type EncryptedChannel struct {
-	dc  *webrtc.DataChannel
-	key *[32]byte
+	dc     *webrtc.DataChannel
+	key    *[32]byte
+	altKey *[32]byte // Alternate key (PBKDF2 fallback for CSP-restricted browsers)
 
 	onData   func([]byte)
 	onResize func(rows, cols uint16)
@@ -62,13 +63,29 @@ func NewEncryptedChannel(dc *webrtc.DataChannel, key *[32]byte) *EncryptedChanne
 	return ec
 }
 
+// SetAltKey sets an alternate key for fallback decryption (PBKDF2 for CSP-restricted browsers)
+func (ec *EncryptedChannel) SetAltKey(altKey *[32]byte) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.altKey = altKey
+}
+
 // handleMessage decrypts and processes incoming messages
 func (ec *EncryptedChannel) handleMessage(data []byte) {
-	// Decrypt the message
+	// Try primary key first (Argon2)
 	plaintext, err := crypto.Decrypt(data, ec.key)
 	if err != nil {
-		// Decryption failed - likely wrong password or corrupted data
-		return
+		// Try alternate key (PBKDF2 fallback)
+		ec.mu.Lock()
+		altKey := ec.altKey
+		ec.mu.Unlock()
+		if altKey != nil {
+			plaintext, err = crypto.Decrypt(data, altKey)
+		}
+		if err != nil {
+			// Both keys failed - likely wrong password or corrupted data
+			return
+		}
 	}
 
 	// Parse the protocol message

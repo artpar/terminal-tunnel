@@ -3,8 +3,10 @@ package crypto
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 const (
@@ -14,6 +16,9 @@ const (
 	argonThreads = 4         // Parallelism
 	argonKeyLen  = 32        // 256-bit key
 	saltLen      = 16        // 128-bit salt
+
+	// PBKDF2 parameters - fallback for environments where Argon2 WASM is blocked
+	pbkdf2Iterations = 600000 // High iteration count for security
 )
 
 // DeriveKey derives a 256-bit encryption key from a password using Argon2id.
@@ -28,6 +33,15 @@ func DeriveKey(password string, salt []byte) [32]byte {
 		argonKeyLen,
 	)
 
+	var keyArray [32]byte
+	copy(keyArray[:], key)
+	return keyArray
+}
+
+// DeriveKeyPBKDF2 derives a 256-bit encryption key using PBKDF2-SHA256.
+// This is a fallback for browsers where Argon2 WASM is blocked by CSP.
+func DeriveKeyPBKDF2(password string, salt []byte) [32]byte {
+	key := pbkdf2.Key([]byte(password), salt, pbkdf2Iterations, argonKeyLen, sha256.New)
 	var keyArray [32]byte
 	copy(keyArray[:], key)
 	return keyArray
