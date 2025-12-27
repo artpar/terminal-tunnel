@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>terminal-tunnel</id>
+    <version>1.4.1</version>
+    <title>Terminal Tunnel</title>
+    <authors>artpar</authors>
+    <owners>artpar</owners>
+    <projectUrl>https://github.com/artpar/terminal-tunnel</projectUrl>
+    <licenseUrl>https://github.com/artpar/terminal-tunnel/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/artpar/terminal-tunnel</projectSourceUrl>
+    <bugTrackerUrl>https://github.com/artpar/terminal-tunnel/issues</bugTrackerUrl>
+    <tags>terminal ssh p2p webrtc encryption sharing remote</tags>
+    <summary>P2P terminal sharing with E2E encryption</summary>
+    <description>
+Share your terminal from anywhere - no signup, no relay servers, just direct encrypted connections.
+
+## Features
+- Zero setup - Single binary, no dependencies
+- Fully P2P - Direct WebRTC connection
+- E2E encrypted - Password-derived keys using Argon2id + NaCl SecretBox
+- Cross-NAT - Works across different networks
+- Web client - Access from any browser
+
+## Quick Start
+```
+tt daemon start
+tt start -p mypassword
+```
+    </description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

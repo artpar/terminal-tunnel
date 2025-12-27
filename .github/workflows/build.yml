@@ -271,6 +271,54 @@ jobs:
           snap: ${{ steps.build.outputs.snap }}
           release: stable
 
+  # Build and publish Chocolatey package
+  chocolatey:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Update nuspec version
+        shell: pwsh
+        run: |
+          $nuspec = Get-Content packages/chocolatey/terminal-tunnel.nuspec
+          $nuspec = $nuspec -replace '<version>.*</version>', '<version>${{ steps.version.outputs.version }}</version>'
+          Set-Content packages/chocolatey/terminal-tunnel.nuspec $nuspec
+
+      - name: Download and get checksum
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          Invoke-WebRequest -Uri "https://github.com/artpar/terminal-tunnel/releases/download/v$version/tt-windows-amd64.zip" -OutFile tt.zip
+          $hash = (Get-FileHash tt.zip -Algorithm SHA256).Hash
+          $install = Get-Content packages/chocolatey/tools/chocolateyinstall.ps1
+          $install = $install -replace "version = '.*'", "version = '$version'"
+          $install = $install -replace "checksum64\s*=\s*'.*'", "checksum64    = '$hash'"
+          Set-Content packages/chocolatey/tools/chocolateyinstall.ps1 $install
+
+      - name: Pack
+        shell: pwsh
+        run: |
+          cd packages/chocolatey
+          choco pack
+
+      - name: Push to Chocolatey
+        shell: pwsh
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          cd packages/chocolatey
+          choco push terminal-tunnel.${{ steps.version.outputs.version }}.nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY
+        continue-on-error: true  # Don't fail build if Chocolatey push fails
+
   # This job requires a PAT with repo scope stored as REPO_TOKEN secret
   # Create at: https://github.com/settings/tokens/new?scopes=repo
   # Add to: https://github.com/artpar/terminal-tunnel/settings/secrets/actions

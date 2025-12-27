@@ -17,6 +17,11 @@ scoop bucket add artpar https://github.com/artpar/scoop-bucket
 scoop install terminal-tunnel
 ```
 
+**Windows (Chocolatey)**
+```powershell
+choco install terminal-tunnel
+```
+
 **Arch Linux (AUR)**
 ```bash
 yay -S terminal-tunnel-bin
@@ -26,6 +31,12 @@ yay -S terminal-tunnel-bin
 **Snap (Linux)**
 ```bash
 sudo snap install terminal-tunnel
+```
+
+**Nix**
+```bash
+nix run github:artpar/terminal-tunnel
+# or install: nix profile install github:artpar/terminal-tunnel
 ```
 
 **Debian / Ubuntu (APT)**
@@ -81,9 +92,9 @@ See [Releases](https://github.com/artpar/terminal-tunnel/releases/latest) for al
 
 | Platform | Architectures | Formats |
 |----------|---------------|---------|
-| Linux | amd64, arm64, armv7 | tar.gz, .deb, .rpm, .apk, Snap |
-| macOS | amd64, arm64 | tar.gz, Homebrew |
-| Windows | amd64, arm64 | .zip, Scoop |
+| Linux | amd64, arm64, armv7 | tar.gz, .deb, .rpm, .apk, Snap, Nix |
+| macOS | amd64, arm64 | tar.gz, Homebrew, Nix |
+| Windows | amd64, arm64 | .zip, Scoop, Chocolatey |
 | FreeBSD | amd64 | tar.gz |
 
 ### Running as a Service (Optional)
