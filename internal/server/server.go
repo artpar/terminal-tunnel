@@ -214,10 +214,12 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 		// Monitor connection state for debugging and early disconnect detection
 		peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+			fmt.Printf("  [WebRTC] Connection state: %s\n", state.String())
 			switch state {
 			case webrtc.PeerConnectionStateConnected:
 				// Connection established
 			case webrtc.PeerConnectionStateDisconnected:
+				// Note: "disconnected" can recover - don't trigger reconnect yet
 				fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
 			case webrtc.PeerConnectionStateFailed:
 				fmt.Printf("\n✗ WebRTC connection failed\n")
@@ -227,6 +229,19 @@ func (s *Server) Start(ctx ...context.Context) error {
 				}
 			case webrtc.PeerConnectionStateClosed:
 				// Connection closed intentionally
+			}
+		})
+
+		// Monitor ICE connection state for debugging
+		peer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+			fmt.Printf("  [ICE] Connection state: %s\n", state.String())
+			switch state {
+			case webrtc.ICEConnectionStateDisconnected:
+				fmt.Printf("\n⚠ ICE disconnected (checking connectivity...)\n")
+			case webrtc.ICEConnectionStateFailed:
+				fmt.Printf("\n✗ ICE failed - NAT/firewall may be blocking UDP\n")
+			case webrtc.ICEConnectionStateClosed:
+				fmt.Printf("\n⚠ ICE connection closed\n")
 			}
 		})
 
@@ -407,7 +422,8 @@ func (s *Server) Start(ctx ...context.Context) error {
 		})
 
 		channel.OnClose(func() {
-			fmt.Printf("\n✓ Client disconnected\n")
+			fmt.Printf("\n✓ Client disconnected (data channel closed)\n")
+			fmt.Printf("  [Debug] Peer connection state: %s\n", s.peer.ConnectionState().String())
 			// Invoke disconnect callback
 			if s.callbacks.OnClientDisconnect != nil {
 				s.callbacks.OnClientDisconnect()
