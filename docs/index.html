@@ -1424,48 +1424,95 @@
             const body = document.body;
             let resizeTimeout = null;
             let lastHeight = window.innerHeight;
+            let keyboardVisible = false;
 
             function setAppHeight(height) {
-                const h = height + 'px';
+                const h = Math.floor(height) + 'px';
                 app.style.height = h;
+                app.style.maxHeight = h;
                 html.style.height = h;
                 body.style.height = h;
             }
 
-            function onViewportChange() {
+            function updateHeight() {
                 // Use visualViewport if available, fallback to innerHeight
-                const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                let vh;
+                if (window.visualViewport) {
+                    vh = window.visualViewport.height;
+                } else {
+                    vh = window.innerHeight;
+                }
 
-                // Only update if height actually changed
-                if (Math.abs(vh - lastHeight) > 10) {
-                    lastHeight = vh;
-                    setAppHeight(vh);
+                // Apply height
+                setAppHeight(vh);
+                lastHeight = vh;
 
-                    // Debounce terminal refit
-                    if (resizeTimeout) clearTimeout(resizeTimeout);
-                    resizeTimeout = setTimeout(() => {
-                        const session = manager.getActiveSession();
-                        if (session && session.fitAddon && session.status === 'connected') {
-                            session.fitAddon.fit();
-                        }
-                    }, 100);
+                // Debounce terminal refit
+                if (resizeTimeout) clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(() => {
+                    const session = manager.getActiveSession();
+                    if (session && session.fitAddon && session.status === 'connected') {
+                        session.fitAddon.fit();
+                    }
+                }, 100);
+            }
+
+            // Continuous polling for viewport changes (iOS workaround)
+            let pollInterval = null;
+            function startPolling() {
+                if (pollInterval) return;
+                pollInterval = setInterval(() => {
+                    const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                    if (Math.abs(currentHeight - lastHeight) > 5) {
+                        updateHeight();
+                    }
+                }, 100);
+            }
+            function stopPolling() {
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
                 }
             }
 
-            // Listen to all possible resize events
+            // Listen to visualViewport events
             if (window.visualViewport) {
-                window.visualViewport.addEventListener('resize', onViewportChange);
-                window.visualViewport.addEventListener('scroll', onViewportChange);
+                window.visualViewport.addEventListener('resize', updateHeight);
+                window.visualViewport.addEventListener('scroll', updateHeight);
             }
-            window.addEventListener('resize', onViewportChange);
+            window.addEventListener('resize', updateHeight);
 
-            // Also handle orientation change
+            // Detect keyboard via focus (iOS workaround)
+            document.addEventListener('focusin', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                    keyboardVisible = true;
+                    startPolling();
+                    // Delay to let keyboard animate
+                    setTimeout(updateHeight, 300);
+                    setTimeout(updateHeight, 500);
+                }
+            });
+
+            document.addEventListener('focusout', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                    keyboardVisible = false;
+                    setTimeout(() => {
+                        if (!keyboardVisible) {
+                            stopPolling();
+                            updateHeight();
+                        }
+                    }, 300);
+                }
+            });
+
+            // Handle orientation change
             window.addEventListener('orientationchange', () => {
-                setTimeout(onViewportChange, 100);
+                setTimeout(updateHeight, 100);
+                setTimeout(updateHeight, 300);
             });
 
             // Initial call
-            setAppHeight(window.visualViewport ? window.visualViewport.height : window.innerHeight);
+            updateHeight();
         }
 
         // ============== Start ==============
