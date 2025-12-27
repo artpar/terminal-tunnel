@@ -28,8 +28,9 @@ type EncryptedChannel struct {
 	onResize func(rows, cols uint16)
 	onClose  func()
 
-	mu     sync.Mutex
-	closed bool
+	mu        sync.Mutex
+	closed    bool
+	useAltKey bool // True if client is using altKey (PBKDF2)
 
 	// Keepalive tracking
 	lastPongTime  time.Time
@@ -74,6 +75,7 @@ func (ec *EncryptedChannel) SetAltKey(altKey *[32]byte) {
 func (ec *EncryptedChannel) handleMessage(data []byte) {
 	// Try primary key first (Argon2)
 	plaintext, err := crypto.Decrypt(data, ec.key)
+	usedAltKey := false
 	if err != nil {
 		// Try alternate key (PBKDF2 fallback)
 		ec.mu.Lock()
@@ -81,12 +83,20 @@ func (ec *EncryptedChannel) handleMessage(data []byte) {
 		ec.mu.Unlock()
 		if altKey != nil {
 			plaintext, err = crypto.Decrypt(data, altKey)
+			if err == nil {
+				usedAltKey = true
+				// Client is using PBKDF2, remember this for responses
+				ec.mu.Lock()
+				ec.useAltKey = true
+				ec.mu.Unlock()
+			}
 		}
 		if err != nil {
 			// Both keys failed - likely wrong password or corrupted data
 			return
 		}
 	}
+	_ = usedAltKey // Used for logging if needed
 
 	// Parse the protocol message
 	msg, err := protocol.DecodeMessage(plaintext)
@@ -126,10 +136,19 @@ func (ec *EncryptedChannel) sendMessage(msg *protocol.Message) error {
 		ec.mu.Unlock()
 		return io.ErrClosedPipe
 	}
+	useAlt := ec.useAltKey
+	altKey := ec.altKey
 	ec.mu.Unlock()
 
 	encoded := msg.Encode()
-	encrypted, err := crypto.Encrypt(encoded, ec.key)
+
+	// Use the same key the client is using
+	key := ec.key
+	if useAlt && altKey != nil {
+		key = altKey
+	}
+
+	encrypted, err := crypto.Encrypt(encoded, key)
 	if err != nil {
 		return err
 	}
