@@ -1207,12 +1207,30 @@
 
         // ============== Crypto ==============
         async function deriveKey(password, saltBytes) {
-            const result = await argon2.hash({
-                pass: password, salt: saltBytes,
-                time: 3, mem: 65536, parallelism: 4, hashLen: 32,
-                type: argon2.ArgonType.Argon2id
-            });
-            return new Uint8Array(result.hash);
+            try {
+                // Try WASM first (faster)
+                const result = await argon2.hash({
+                    pass: password, salt: saltBytes,
+                    time: 3, mem: 65536, parallelism: 4, hashLen: 32,
+                    type: argon2.ArgonType.Argon2id
+                });
+                return new Uint8Array(result.hash);
+            } catch (wasmError) {
+                console.warn('WASM Argon2 failed, trying asm.js fallback:', wasmError.message);
+                try {
+                    // Fallback to asm.js mode (slower but works without WASM)
+                    const result = await argon2.hash({
+                        pass: password, salt: saltBytes,
+                        time: 3, mem: 65536, parallelism: 4, hashLen: 32,
+                        type: argon2.ArgonType.Argon2id,
+                        wasmMemory: null // Force asm.js
+                    });
+                    return new Uint8Array(result.hash);
+                } catch (asmError) {
+                    console.error('Argon2 failed completely:', asmError);
+                    throw new Error('Key derivation failed - browser may not support required crypto');
+                }
+            }
         }
 
         async function encrypt(session, data) {

@@ -120,7 +120,7 @@ const EXPIRY_SECONDS = 300; // 5 minutes
 
 // Rate limiting
 const RATE_LIMIT_WINDOW = 60; // 1 minute
-const MAX_REQUESTS_PER_IP = 30;
+const MAX_REQUESTS_PER_IP = 100; // Enough for session creation + polling
 
 // CORS whitelist
 const ALLOWED_ORIGINS = [
