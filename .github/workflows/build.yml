@@ -178,6 +178,39 @@ jobs:
           echo "Release artifacts:"
           ls -la
 
+      - name: Build Linux packages (DEB, RPM, APK)
+        run: |
+          # Install nfpm
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+          VERSION=${{ steps.version.outputs.version }}
+          VERSION_NUM=${VERSION#v}  # Remove 'v' prefix for package version
+
+          # Find and prepare Linux binaries
+          for arch in amd64 arm64; do
+            binary=$(find artifacts -name "tt-linux-${arch}" -type f | head -1)
+            if [ -n "$binary" ]; then
+              mkdir -p build
+              cp "$binary" "build/tt-linux-${arch}"
+              chmod +x "build/tt-linux-${arch}"
+
+              # Generate nfpm config with envsubst
+              GOARCH=$arch VERSION=$VERSION_NUM envsubst < nfpm.yaml > /tmp/nfpm-${arch}.yaml
+
+              # Build packages
+              nfpm pkg --config /tmp/nfpm-${arch}.yaml --packager deb --target "release/tt_${VERSION_NUM}_${arch}.deb"
+              nfpm pkg --config /tmp/nfpm-${arch}.yaml --packager rpm --target "release/tt-${VERSION_NUM}.$([ $arch = amd64 ] && echo x86_64 || echo aarch64).rpm"
+              nfpm pkg --config /tmp/nfpm-${arch}.yaml --packager apk --target "release/tt_${VERSION_NUM}_$([ $arch = amd64 ] && echo x86_64 || echo aarch64).apk"
+            fi
+          done
+
+          # Update checksums
+          cd release
+          sha256sum *.deb *.rpm *.apk >> checksums-sha256.txt 2>/dev/null || true
+
+          echo "Packages built:"
+          ls -la *.deb *.rpm *.apk 2>/dev/null || true
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -186,17 +219,26 @@ jobs:
           body: |
             ## Installation
 
-            ### Linux/macOS
+            ### Package Managers (Recommended)
             ```bash
-            # Download and extract (example for Linux AMD64)
-            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/tt-${{ steps.version.outputs.version }}-linux-amd64.tar.gz
-            tar -xzf tt-${{ steps.version.outputs.version }}-linux-amd64.tar.gz
-            chmod +x tt
-            sudo mv tt /usr/local/bin/
+            # macOS/Linux (Homebrew)
+            brew install artpar/tap/tt
+
+            # Windows (Scoop)
+            scoop bucket add artpar https://github.com/artpar/scoop-bucket
+            scoop install terminal-tunnel
+
+            # Debian/Ubuntu (APT)
+            echo "deb [trusted=yes] https://artpar.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/terminal-tunnel.list
+            sudo apt update && sudo apt install terminal-tunnel
             ```
 
-            ### Windows
-            Download the `.zip` file, extract, and add to PATH.
+            ### Direct Download
+            ```bash
+            # Linux AMD64
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/tt-linux-amd64.tar.gz
+            tar -xzf tt-linux-amd64.tar.gz && sudo mv tt /usr/local/bin/
+            ```
 
             ### Verify checksums
             ```bash
@@ -208,3 +250,200 @@ jobs:
             tt daemon start
             tt start -p mypassword
             ```
+
+  # This job requires a PAT with repo scope stored as REPO_TOKEN secret
+  # Create at: https://github.com/settings/tokens/new?scopes=repo
+  # Add to: https://github.com/artpar/terminal-tunnel/settings/secrets/actions
+  update-repos:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_NUM=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version_num=${VERSION_NUM}" >> $GITHUB_OUTPUT
+
+      - name: Download release assets
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          VERSION_NUM=${{ steps.version.outputs.version_num }}
+          mkdir -p packages
+
+          # Download DEB packages
+          curl -sLO "https://github.com/${{ github.repository }}/releases/download/${VERSION}/tt_${VERSION_NUM}_amd64.deb"
+          curl -sLO "https://github.com/${{ github.repository }}/releases/download/${VERSION}/tt_${VERSION_NUM}_arm64.deb"
+          mv *.deb packages/ 2>/dev/null || true
+
+          # Download tar.gz for checksums
+          curl -sLO "https://github.com/${{ github.repository }}/releases/download/${VERSION}/tt-linux-amd64.tar.gz"
+          curl -sLO "https://github.com/${{ github.repository }}/releases/download/${VERSION}/tt-linux-arm64.tar.gz"
+          curl -sLO "https://github.com/${{ github.repository }}/releases/download/${VERSION}/tt-darwin-amd64.tar.gz"
+          curl -sLO "https://github.com/${{ github.repository }}/releases/download/${VERSION}/tt-darwin-arm64.tar.gz"
+          curl -sLO "https://github.com/${{ github.repository }}/releases/download/${VERSION}/tt-windows-amd64.zip"
+          curl -sLO "https://github.com/${{ github.repository }}/releases/download/${VERSION}/tt-windows-arm64.zip"
+
+          # Calculate checksums
+          echo "SHA256 checksums:"
+          sha256sum tt-*.tar.gz tt-*.zip
+
+      - name: Update APT repository
+        env:
+          GH_TOKEN: ${{ secrets.REPO_TOKEN }}
+        run: |
+          VERSION_NUM=${{ steps.version.outputs.version_num }}
+
+          # Clone apt-repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/artpar/apt-repo.git
+          cd apt-repo
+
+          # Copy new packages
+          cp ../packages/*.deb pool/main/
+
+          # Remove old packages (keep only latest)
+          cd pool/main
+          ls -t *.deb | tail -n +3 | xargs rm -f 2>/dev/null || true
+          cd ../..
+
+          # Regenerate indexes
+          dpkg-scanpackages --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
+          dpkg-scanpackages --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages
+          gzip -kf dists/stable/main/binary-amd64/Packages
+          gzip -kf dists/stable/main/binary-arm64/Packages
+
+          # Update Release file
+          cd dists/stable
+          apt-ftparchive release . > Release.new
+          mv Release.new Release
+          cd ../..
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update to v${VERSION_NUM}" || echo "No changes"
+          git push
+
+      - name: Update Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.REPO_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          VERSION_NUM=${{ steps.version.outputs.version_num }}
+
+          # Get checksums
+          DARWIN_ARM64_SHA=$(sha256sum tt-darwin-arm64.tar.gz | cut -d' ' -f1)
+          DARWIN_AMD64_SHA=$(sha256sum tt-darwin-amd64.tar.gz | cut -d' ' -f1)
+          LINUX_ARM64_SHA=$(sha256sum tt-linux-arm64.tar.gz | cut -d' ' -f1)
+          LINUX_AMD64_SHA=$(sha256sum tt-linux-amd64.tar.gz | cut -d' ' -f1)
+
+          # Clone homebrew-tap
+          git clone https://x-access-token:${GH_TOKEN}@github.com/artpar/homebrew-tap.git
+          cd homebrew-tap
+
+          # Update formula
+          cat > Formula/tt.rb << EOF
+          class Tt < Formula
+            desc "P2P terminal sharing with E2E encryption"
+            homepage "https://github.com/artpar/terminal-tunnel"
+            version "${VERSION_NUM}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/artpar/terminal-tunnel/releases/download/${VERSION}/tt-darwin-arm64.tar.gz"
+                sha256 "${DARWIN_ARM64_SHA}"
+              end
+              on_intel do
+                url "https://github.com/artpar/terminal-tunnel/releases/download/${VERSION}/tt-darwin-amd64.tar.gz"
+                sha256 "${DARWIN_AMD64_SHA}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/artpar/terminal-tunnel/releases/download/${VERSION}/tt-linux-arm64.tar.gz"
+                sha256 "${LINUX_ARM64_SHA}"
+              end
+              on_intel do
+                url "https://github.com/artpar/terminal-tunnel/releases/download/${VERSION}/tt-linux-amd64.tar.gz"
+                sha256 "${LINUX_AMD64_SHA}"
+              end
+            end
+
+            def install
+              bin.install "tt"
+            end
+
+            test do
+              system "#{bin}/tt", "--version"
+            end
+          end
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update to v${VERSION_NUM}" || echo "No changes"
+          git push
+
+      - name: Update Scoop bucket
+        env:
+          GH_TOKEN: ${{ secrets.REPO_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          VERSION_NUM=${{ steps.version.outputs.version_num }}
+
+          # Get checksums
+          WIN_AMD64_SHA=$(sha256sum tt-windows-amd64.zip | cut -d' ' -f1)
+          WIN_ARM64_SHA=$(sha256sum tt-windows-arm64.zip | cut -d' ' -f1)
+
+          # Clone scoop-bucket
+          git clone https://x-access-token:${GH_TOKEN}@github.com/artpar/scoop-bucket.git
+          cd scoop-bucket
+
+          # Update manifest
+          cat > bucket/terminal-tunnel.json << EOF
+          {
+              "version": "${VERSION_NUM}",
+              "description": "P2P terminal sharing with E2E encryption",
+              "homepage": "https://github.com/artpar/terminal-tunnel",
+              "license": "MIT",
+              "architecture": {
+                  "64bit": {
+                      "url": "https://github.com/artpar/terminal-tunnel/releases/download/${VERSION}/tt-windows-amd64.zip",
+                      "hash": "${WIN_AMD64_SHA}"
+                  },
+                  "arm64": {
+                      "url": "https://github.com/artpar/terminal-tunnel/releases/download/${VERSION}/tt-windows-arm64.zip",
+                      "hash": "${WIN_ARM64_SHA}"
+                  }
+              },
+              "bin": "tt.exe",
+              "checkver": {
+                  "github": "https://github.com/artpar/terminal-tunnel"
+              },
+              "autoupdate": {
+                  "architecture": {
+                      "64bit": {
+                          "url": "https://github.com/artpar/terminal-tunnel/releases/download/v\$version/tt-windows-amd64.zip"
+                      },
+                      "arm64": {
+                          "url": "https://github.com/artpar/terminal-tunnel/releases/download/v\$version/tt-windows-arm64.zip"
+                      }
+                  }
+              }
+          }
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update to v${VERSION_NUM}" || echo "No changes"
+          git push
