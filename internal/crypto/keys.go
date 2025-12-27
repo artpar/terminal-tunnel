@@ -41,3 +41,13 @@ func GenerateSalt() ([]byte, error) {
 	}
 	return salt, nil
 }
+
+// GenerateRandomKey creates a cryptographically secure random 256-bit key.
+// Used for public viewer sessions where key is stored in relay.
+func GenerateRandomKey() ([]byte, error) {
+	key := make([]byte, argonKeyLen)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	return key, nil
+}

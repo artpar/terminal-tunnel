@@ -264,6 +264,14 @@
         .status-bar-left .latency { color: #4ecdc4; }
         .status-bar-left .latency.warn { color: #f9ca24; }
         .status-bar-left .latency.bad { color: #ff6b6b; }
+        .status-bar-left .read-only-badge {
+            background: #f9ca24;
+            color: #000;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+        }
 
         .status-bar-right {
             display: flex;
@@ -348,6 +356,7 @@
             <div class="status-bar-left">
                 <span id="connection-status">No active session</span>
                 <span class="latency" id="latency"></span>
+                <span class="read-only-badge hidden" id="read-only-badge">READ-ONLY</span>
             </div>
             <div class="status-bar-right">
                 <button id="reconnect-btn" class="reconnect-btn hidden">Reconnect</button>
@@ -429,6 +438,12 @@
                 this.reconnectAttempts = 0;
                 this.maxReconnectAttempts = 5;
                 this.password = null; // Stored for auto-reconnect only
+                this.readOnly = false; // True for viewer sessions (code ends with V)
+            }
+
+            // Check if this is a viewer session (code ends with V)
+            isViewer() {
+                return this.code && this.code.toUpperCase().endsWith('V');
             }
 
             destroy() {
@@ -555,7 +570,15 @@
                 session.code = code.toUpperCase();
                 manager.setActive(session.id);
                 createSessionUI(session);
-                showConnectScreen(session, 'password');
+
+                // Check if this is a viewer session (code ends with V)
+                if (session.isViewer()) {
+                    session.readOnly = true;
+                    // Viewer mode - connect directly without password
+                    startViewerConnection(session);
+                } else {
+                    showConnectScreen(session, 'password');
+                }
             } else {
                 showNewSessionDialog();
             }
@@ -681,6 +704,10 @@
             }
 
             reconnectBtn.classList.toggle('hidden', session.status !== 'disconnected' || !session.code);
+
+            // Show read-only badge for viewer sessions
+            const readOnlyBadge = document.getElementById('read-only-badge');
+            readOnlyBadge.classList.toggle('hidden', !session.readOnly);
         }
 
         // ============== Session UI Creation ==============
@@ -807,6 +834,46 @@
         }
 
         // ============== Connection Logic ==============
+
+        // Viewer connection - no password needed, key is fetched from relay
+        async function startViewerConnection(session) {
+            session.status = 'connecting';
+            manager.updateUI();
+
+            const statusText = session.connectScreen.querySelector('.status-text');
+            const spinner = session.connectScreen.querySelector('.spinner');
+            session.connectScreen.classList.add('active');
+            spinner.classList.remove('hidden');
+
+            try {
+                statusText.textContent = 'Fetching viewer session...';
+                const response = await fetch(`${session.relayUrl}/session/${session.code}`);
+                if (!response.ok) {
+                    throw new Error(response.status === 404 ? 'Session not found or expired' : 'Failed to fetch session');
+                }
+                const data = await response.json();
+
+                if (!data.read_only || !data.key) {
+                    throw new Error('Invalid viewer session');
+                }
+
+                // Use the key directly from the relay (no password derivation needed)
+                statusText.textContent = 'Connecting (read-only mode)...';
+                session.encryptionKey = base64ToBytes(data.key);
+                session.name = session.code + ' (Viewer)';
+
+                statusText.textContent = 'Establishing connection...';
+                await establishConnection(session, data.sdp, session.code);
+
+            } catch (err) {
+                statusText.textContent = 'Error: ' + err.message;
+                statusText.classList.add('error');
+                session.status = 'disconnected';
+                spinner.classList.add('hidden');
+                manager.updateUI();
+            }
+        }
+
         async function startConnection(session, formArea) {
             const codeInput = formArea.querySelector('.code-input');
             const passwordInput = formArea.querySelector('.password-input');
@@ -1055,10 +1122,15 @@
             const mobile = isMobile();
 
             session.term = new Terminal({
-                cursorBlink: true,
+                cursorBlink: !session.readOnly, // Don't blink cursor in read-only mode
                 fontSize: mobile ? 12 : 14,
                 fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-                theme: { background: '#1a1a2e', foreground: '#e0e0e0', cursor: '#e94560' }
+                theme: {
+                    background: '#1a1a2e',
+                    foreground: '#e0e0e0',
+                    cursor: session.readOnly ? '#888' : '#e94560' // Dim cursor in read-only mode
+                },
+                disableStdin: session.readOnly // Disable input in read-only mode
             });
 
             session.fitAddon = new FitAddon.FitAddon();
@@ -1066,11 +1138,15 @@
             session.term.open(termContainer);
             session.fitAddon.fit();
 
-            session.term.onData((data) => {
-                sendMessage(session, MSG_DATA, new TextEncoder().encode(data));
-            });
+            // Only send input if not in read-only mode
+            if (!session.readOnly) {
+                session.term.onData((data) => {
+                    sendMessage(session, MSG_DATA, new TextEncoder().encode(data));
+                });
+            }
 
-            if (mobile) {
+            // Mobile input handling (disabled in read-only mode)
+            if (mobile && !session.readOnly) {
                 mobileInput.classList.add('active');
                 mobileInput.addEventListener('input', (e) => {
                     if (e.target.value) {
@@ -1097,17 +1173,20 @@
                 });
                 termContainer.addEventListener('touchstart', () => mobileInput.focus(), { passive: true });
                 termContainer.addEventListener('click', () => mobileInput.focus());
-            } else {
+            } else if (!session.readOnly) {
                 termContainer.addEventListener('click', () => session.term.focus());
                 session.term.focus();
             }
 
-            session.term.onResize(({ rows, cols }) => {
-                const payload = new Uint8Array(4);
-                new DataView(payload.buffer).setUint16(0, rows, false);
-                new DataView(payload.buffer).setUint16(2, cols, false);
-                sendMessage(session, MSG_RESIZE, payload);
-            });
+            // Resize handling (viewers don't send resize events - host controls terminal size)
+            if (!session.readOnly) {
+                session.term.onResize(({ rows, cols }) => {
+                    const payload = new Uint8Array(4);
+                    new DataView(payload.buffer).setUint16(0, rows, false);
+                    new DataView(payload.buffer).setUint16(2, cols, false);
+                    sendMessage(session, MSG_RESIZE, payload);
+                });
+            }
 
             window.addEventListener('resize', () => {
                 if (session.fitAddon) session.fitAddon.fit();
@@ -1115,11 +1194,14 @@
 
             setTimeout(() => {
                 session.fitAddon.fit();
-                const { rows, cols } = session.term;
-                const payload = new Uint8Array(4);
-                new DataView(payload.buffer).setUint16(0, rows, false);
-                new DataView(payload.buffer).setUint16(2, cols, false);
-                sendMessage(session, MSG_RESIZE, payload);
+                // Only send initial resize for non-viewers
+                if (!session.readOnly) {
+                    const { rows, cols } = session.term;
+                    const payload = new Uint8Array(4);
+                    new DataView(payload.buffer).setUint16(0, rows, false);
+                    new DataView(payload.buffer).setUint16(2, cols, false);
+                    sendMessage(session, MSG_RESIZE, payload);
+                }
             }, 100);
         }
 

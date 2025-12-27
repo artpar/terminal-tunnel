@@ -77,6 +77,8 @@ type StartSessionParams struct {
 	Password string `json:"password,omitempty"` // Auto-generated if empty
 	Shell    string `json:"shell,omitempty"`    // Default to $SHELL
 	NoTURN   bool   `json:"no_turn,omitempty"`  // Disable TURN relay (P2P only)
+	Public   bool   `json:"public,omitempty"`   // Enable public viewer mode (read-only viewers without password)
+	Record   bool   `json:"record,omitempty"`   // Enable session recording
 }
 
 // StopSessionParams represents parameters for session.stop
@@ -98,22 +100,28 @@ const (
 
 // SessionInfo represents information about a session
 type SessionInfo struct {
-	ID        string        `json:"id"`
-	ShortCode string        `json:"short_code"`
-	Status    SessionStatus `json:"status"`
-	Shell     string        `json:"shell"`
-	CreatedAt time.Time     `json:"created_at"`
-	LastSeen  time.Time     `json:"last_seen"`
-	ClientURL string        `json:"client_url"`
+	ID         string        `json:"id"`
+	ShortCode  string        `json:"short_code"`
+	Status     SessionStatus `json:"status"`
+	Shell      string        `json:"shell"`
+	CreatedAt  time.Time     `json:"created_at"`
+	LastSeen   time.Time     `json:"last_seen"`
+	ClientURL  string        `json:"client_url"`
+	Public     bool          `json:"public,omitempty"`      // True if public viewer mode is enabled
+	ViewerCode string        `json:"viewer_code,omitempty"` // Code for public viewers (ends with V)
+	ViewerURL  string        `json:"viewer_url,omitempty"`  // URL for public viewers
 }
 
 // StartSessionResult represents the result of session.start
 type StartSessionResult struct {
-	ID        string `json:"id"`
-	ShortCode string `json:"short_code"`
-	Password  string `json:"password"` // Return generated password
-	ClientURL string `json:"client_url"`
-	Status    string `json:"status"`
+	ID         string `json:"id"`
+	ShortCode  string `json:"short_code"`
+	Password   string `json:"password"` // Return generated password
+	ClientURL  string `json:"client_url"`
+	Status     string `json:"status"`
+	Public     bool   `json:"public,omitempty"`      // True if public viewer mode is enabled
+	ViewerCode string `json:"viewer_code,omitempty"` // Code for public viewers (ends with V)
+	ViewerURL  string `json:"viewer_url,omitempty"`  // URL for public viewers
 }
 
 // StopSessionResult represents the result of session.stop

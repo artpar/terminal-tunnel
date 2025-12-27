@@ -35,26 +35,32 @@ type ManagedSession struct {
 
 // SessionState represents the persistent state of a session
 type SessionState struct {
-	ID        string        `json:"id"`
-	ShortCode string        `json:"short_code"`
-	PTYPath   string        `json:"pty_path"`
-	ShellPID  int           `json:"shell_pid"`
-	Shell     string        `json:"shell"`
-	Salt      string        `json:"salt"`
-	Status    SessionStatus `json:"status"`
-	CreatedAt time.Time     `json:"created_at"`
-	LastSeen  time.Time     `json:"last_seen"`
-	RelayURL  string        `json:"relay_url"`
-	ClientURL string        `json:"client_url"`
+	ID         string        `json:"id"`
+	ShortCode  string        `json:"short_code"`
+	PTYPath    string        `json:"pty_path"`
+	ShellPID   int           `json:"shell_pid"`
+	Shell      string        `json:"shell"`
+	Salt       string        `json:"salt"`
+	Status     SessionStatus `json:"status"`
+	CreatedAt  time.Time     `json:"created_at"`
+	LastSeen   time.Time     `json:"last_seen"`
+	RelayURL   string        `json:"relay_url"`
+	ClientURL  string        `json:"client_url"`
+	Public     bool          `json:"public,omitempty"`      // True if public viewer mode enabled
+	ViewerCode string        `json:"viewer_code,omitempty"` // Code for public viewers (ends with V)
+	ViewerURL  string        `json:"viewer_url,omitempty"`  // URL for public viewers
 }
 
 // SessionStartResult contains info returned when starting a session
 type SessionStartResult struct {
-	ID        string
-	ShortCode string
-	Password  string
-	ClientURL string
-	Status    SessionStatus
+	ID         string
+	ShortCode  string
+	Password   string
+	ClientURL  string
+	Status     SessionStatus
+	Public     bool   // True if public viewer mode enabled
+	ViewerCode string // Code for public viewers (ends with V)
+	ViewerURL  string // URL for public viewers
 }
 
 // SessionManager manages all sessions
@@ -122,6 +128,8 @@ func (sm *SessionManager) StartSession(params StartSessionParams) (*SessionStart
 		Shell:    shell,
 		Timeout:  0, // No timeout for daemon-managed sessions
 		NoTURN:   params.NoTURN,
+		Public:   params.Public,
+		Record:   params.Record,
 	}
 
 	// Create context for this session
@@ -143,6 +151,7 @@ func (sm *SessionManager) StartSession(params StartSessionParams) (*SessionStart
 			Shell:     shell,
 			CreatedAt: time.Now(),
 			LastSeen:  time.Now(),
+			Public:    params.Public,
 		},
 		Server:   srv,
 		Cancel:   cancel,
@@ -169,6 +178,12 @@ func (sm *SessionManager) StartSession(params StartSessionParams) (*SessionStart
 			default:
 			}
 		},
+		OnViewerCodeReady: func(viewerCode, viewerURL string) {
+			sm.mu.Lock()
+			ms.State.ViewerCode = viewerCode
+			ms.State.ViewerURL = viewerURL
+			sm.mu.Unlock()
+		},
 		OnClientConnect: func() {
 			sm.mu.Lock()
 			ms.State.Status = StatusConnected
@@ -179,6 +194,14 @@ func (sm *SessionManager) StartSession(params StartSessionParams) (*SessionStart
 			sm.mu.Lock()
 			ms.State.Status = StatusDisconnected
 			sm.mu.Unlock()
+		},
+		OnViewerConnect: func() {
+			sm.mu.Lock()
+			ms.State.LastSeen = time.Now()
+			sm.mu.Unlock()
+		},
+		OnViewerDisconnect: func() {
+			// Viewers disconnecting doesn't change session status
 		},
 		OnPTYReady: func(ptyPath string, shellPID int) {
 			sm.mu.Lock()
@@ -223,11 +246,14 @@ func (sm *SessionManager) StartSession(params StartSessionParams) (*SessionStart
 
 	sm.mu.RLock()
 	result := &SessionStartResult{
-		ID:        id,
-		ShortCode: ms.State.ShortCode,
-		Password:  password,
-		ClientURL: ms.State.ClientURL,
-		Status:    ms.State.Status,
+		ID:         id,
+		ShortCode:  ms.State.ShortCode,
+		Password:   password,
+		ClientURL:  ms.State.ClientURL,
+		Status:     ms.State.Status,
+		Public:     ms.State.Public,
+		ViewerCode: ms.State.ViewerCode,
+		ViewerURL:  ms.State.ViewerURL,
 	}
 	sm.mu.RUnlock()
 

@@ -13,6 +13,7 @@ import (
 	"github.com/skip2/go-qrcode"
 
 	"github.com/artpar/terminal-tunnel/internal/crypto"
+	"github.com/artpar/terminal-tunnel/internal/recording"
 	"github.com/artpar/terminal-tunnel/internal/signaling"
 	ttwebrtc "github.com/artpar/terminal-tunnel/internal/webrtc"
 	"github.com/artpar/terminal-tunnel/internal/web"
@@ -20,20 +21,26 @@ import (
 
 // Options configures the terminal tunnel server
 type Options struct {
-	Password string
-	Shell    string
-	Timeout  time.Duration
-	RelayURL string // WebSocket relay URL for signaling
-	NoRelay  bool   // Disable relay, use manual if UPnP fails
-	Manual   bool   // Force manual (QR/copy-paste) signaling mode
-	NoTURN   bool   // Disable TURN servers (P2P only, may fail with symmetric NAT)
+	Password   string
+	Shell      string
+	Timeout    time.Duration
+	RelayURL   string // WebSocket relay URL for signaling
+	NoRelay    bool   // Disable relay, use manual if UPnP fails
+	Manual     bool   // Force manual (QR/copy-paste) signaling mode
+	NoTURN     bool   // Disable TURN servers (P2P only, may fail with symmetric NAT)
+	Public     bool   // Enable public viewer mode (read-only viewers without password)
+	Record     bool   // Enable session recording
+	RecordFile string // Custom recording file path (optional)
 }
 
 // Callbacks for daemon integration
 type Callbacks struct {
 	OnShortCodeReady   func(code, clientURL string)
+	OnViewerCodeReady  func(viewerCode, viewerURL string) // For public viewer mode
 	OnClientConnect    func()
 	OnClientDisconnect func()
+	OnViewerConnect    func() // For public viewer connections
+	OnViewerDisconnect func()
 	OnPTYReady         func(ptyPath string, shellPID int)
 }
 
@@ -64,6 +71,15 @@ type Server struct {
 	cancel          context.CancelFunc
 	callbacks       Callbacks
 	webrtcConfig    ttwebrtc.Config
+
+	// Public viewer support (dual-peer architecture)
+	viewerPeer    *ttwebrtc.Peer
+	viewerChannel *ttwebrtc.EncryptedChannel
+	viewerKey     [32]byte // Random key for viewer encryption (stored in relay)
+	viewerCode    string   // Viewer session code (ends with V)
+
+	// Recording support
+	recorder *recording.Recorder
 }
 
 // NewServer creates a new terminal tunnel server
@@ -88,13 +104,24 @@ func NewServer(opts Options) (*Server, error) {
 		webrtcConfig = ttwebrtc.DefaultConfig()
 	}
 
-	return &Server{
+	server := &Server{
 		opts:         opts,
 		salt:         salt,
 		key:          key,
 		sessionID:    sessionID,
 		webrtcConfig: webrtcConfig,
-	}, nil
+	}
+
+	// Generate random viewer key if public mode is enabled
+	if opts.Public {
+		viewerKeyBytes, err := crypto.GenerateRandomKey()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate viewer key: %w", err)
+		}
+		copy(server.viewerKey[:], viewerKeyBytes)
+	}
+
+	return server, nil
 }
 
 // New is an alias for NewServer (for daemon use)
@@ -300,6 +327,26 @@ func (s *Server) Start(ctx ...context.Context) error {
 			if s.callbacks.OnPTYReady != nil {
 				s.callbacks.OnPTYReady(pty.Name(), pty.PID())
 			}
+
+			// Start recording if enabled
+			if s.opts.Record && s.recorder == nil {
+				recordPath := s.opts.RecordFile
+				if recordPath == "" {
+					// Generate default recording path using short code
+					code := s.sessionID
+					if s.shortCodeClient != nil {
+						code = s.shortCodeClient.GetCode()
+					}
+					recordPath = recording.GenerateRecordingPath(code)
+				}
+				rec, err := recording.NewRecorder(recordPath, 80, 24, "Terminal Tunnel Session")
+				if err != nil {
+					fmt.Printf("⚠ Failed to start recording: %v\n", err)
+				} else {
+					s.recorder = rec
+					fmt.Printf("✓ Recording to: %s\n", recordPath)
+				}
+			}
 		}
 
 		fmt.Printf("✓ Terminal session active\n")
@@ -317,6 +364,11 @@ func (s *Server) Start(ctx ...context.Context) error {
 		// Create bridge
 		bridge := NewBridge(s.pty, channel.SendData)
 		s.bridge = bridge
+
+		// Attach recorder to bridge if recording is enabled
+		if s.recorder != nil {
+			bridge.SetRecorder(s.recorder.WriteOutput)
+		}
 
 		// Handle incoming data
 		channel.OnData(func(data []byte) {
@@ -368,7 +420,8 @@ func (s *Server) Start(ctx ...context.Context) error {
 // PTY is kept running to allow client reconnection to the same session
 func (s *Server) cleanupConnection() {
 	if s.bridge != nil {
-		s.bridge.CloseWithoutPTY() // Keep PTY running for reconnection
+		s.bridge.ClearViewerSends() // Clear viewer sends before closing
+		s.bridge.CloseWithoutPTY()  // Keep PTY running for reconnection
 		s.bridge = nil
 	}
 	if s.channel != nil {
@@ -376,9 +429,17 @@ func (s *Server) cleanupConnection() {
 		s.channel.Close()
 		s.channel = nil
 	}
+	if s.viewerChannel != nil {
+		s.viewerChannel.Close()
+		s.viewerChannel = nil
+	}
 	if s.peer != nil {
 		s.peer.Close()
 		s.peer = nil
+	}
+	if s.viewerPeer != nil {
+		s.viewerPeer.Close()
+		s.viewerPeer = nil
 	}
 }
 
@@ -389,6 +450,9 @@ func (s *Server) Stop() error {
 	}
 	if s.channel != nil {
 		s.channel.Close()
+	}
+	if s.viewerChannel != nil {
+		s.viewerChannel.Close()
 	}
 	if s.pty != nil {
 		s.pty.Close()
@@ -402,8 +466,18 @@ func (s *Server) Stop() error {
 	if s.peer != nil {
 		s.peer.Close()
 	}
+	if s.viewerPeer != nil {
+		s.viewerPeer.Close()
+	}
 	if s.upnpClose != nil {
 		s.upnpClose()
+	}
+	// Close recorder and print summary
+	if s.recorder != nil {
+		path := s.recorder.Path()
+		duration := s.recorder.Duration()
+		s.recorder.Close()
+		fmt.Printf("✓ Recording saved: %s (duration: %v)\n", path, duration.Round(time.Second))
 	}
 	return nil
 }
@@ -570,12 +644,81 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 	client := signaling.NewShortCodeClient(s.opts.RelayURL, signaling.GetClientURL())
 	s.shortCodeClient = client
 
-	// Create session and get short code
-	code, err := client.CreateSession(offer, saltB64)
-	if err != nil {
-		fmt.Printf("⚠ Failed to create session: %v\n", err)
-		fmt.Printf("Falling back to manual mode...\n")
-		return s.startManualSignaling(offer)
+	var code string
+	var viewerCode string
+	var err error
+
+	// If public mode, create viewer peer and session
+	if s.opts.Public {
+		// Create viewer WebRTC peer
+		viewerPeer, err := ttwebrtc.NewPeer(s.webrtcConfig)
+		if err != nil {
+			return "", fmt.Errorf("failed to create viewer peer: %w", err)
+		}
+		s.viewerPeer = viewerPeer
+
+		// Create viewer data channel
+		viewerDC, err := viewerPeer.CreateDataChannel("terminal")
+		if err != nil {
+			viewerPeer.Close()
+			return "", fmt.Errorf("failed to create viewer data channel: %w", err)
+		}
+
+		// Create viewer SDP offer
+		viewerOffer, err := viewerPeer.CreateOffer()
+		if err != nil {
+			viewerPeer.Close()
+			return "", fmt.Errorf("failed to create viewer offer: %w", err)
+		}
+
+		// Encode viewer key
+		viewerKeyB64 := base64.StdEncoding.EncodeToString(s.viewerKey[:])
+
+		// Create session with viewer
+		code, viewerCode, err = client.CreateSessionWithViewer(offer, saltB64, viewerOffer, viewerKeyB64)
+		if err != nil {
+			viewerPeer.Close()
+			fmt.Printf("⚠ Failed to create session with viewer: %v\n", err)
+			fmt.Printf("Falling back to manual mode...\n")
+			return s.startManualSignaling(offer)
+		}
+		s.viewerCode = viewerCode
+
+		// Set up viewer data channel handler (output only, no input)
+		viewerDC.OnOpen(func() {
+			fmt.Printf("✓ Viewer connected\n")
+			if s.callbacks.OnViewerConnect != nil {
+				s.callbacks.OnViewerConnect()
+			}
+
+			// Create encrypted channel for viewer with viewer key
+			viewerChannel := ttwebrtc.NewEncryptedChannel(viewerDC, &s.viewerKey)
+			s.viewerChannel = viewerChannel
+
+			// Add viewer to bridge output (if bridge exists)
+			if s.bridge != nil {
+				s.bridge.AddViewerSend(viewerChannel.SendData)
+			}
+
+			// Handle viewer disconnect (no input handling for viewers)
+			viewerChannel.OnClose(func() {
+				fmt.Printf("✓ Viewer disconnected\n")
+				if s.callbacks.OnViewerDisconnect != nil {
+					s.callbacks.OnViewerDisconnect()
+				}
+			})
+		})
+
+		// Start waiting for viewer answer in background
+		go s.waitForViewerConnection()
+	} else {
+		// Normal session without viewer
+		code, err = client.CreateSession(offer, saltB64)
+		if err != nil {
+			fmt.Printf("⚠ Failed to create session: %v\n", err)
+			fmt.Printf("Falling back to manual mode...\n")
+			return s.startManualSignaling(offer)
+		}
 	}
 
 	clientURL := client.GetClientURL()
@@ -590,6 +733,19 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 	fmt.Printf("  Password: %s\n", s.opts.Password)
 	fmt.Printf("\n")
 	fmt.Printf("  Or open: %s\n", clientURL)
+
+	// Display viewer info if public mode
+	if s.opts.Public && viewerCode != "" {
+		viewerURL := client.GetViewerURL()
+		fmt.Printf("\n")
+		fmt.Printf("  Viewer Code: %s (read-only, no password)\n", viewerCode)
+		fmt.Printf("  Viewer URL:  %s\n", viewerURL)
+
+		// Invoke callback for viewer code ready
+		if s.callbacks.OnViewerCodeReady != nil {
+			s.callbacks.OnViewerCodeReady(viewerCode, viewerURL)
+		}
+	}
 
 	// Invoke callback for short code ready
 	if s.callbacks.OnShortCodeReady != nil {
@@ -626,4 +782,28 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 	}
 
 	return answer, nil
+}
+
+// waitForViewerConnection waits for a viewer to connect in the background
+func (s *Server) waitForViewerConnection() {
+	if s.shortCodeClient == nil || s.viewerPeer == nil {
+		return
+	}
+
+	// Wait for viewer answer
+	answer, err := s.shortCodeClient.WaitForViewerAnswerWithContext(s.ctx)
+	if err != nil {
+		if s.ctx.Err() == nil {
+			fmt.Printf("⚠ Viewer connection failed: %v\n", err)
+		}
+		return
+	}
+
+	// Set remote description
+	if err := s.viewerPeer.SetRemoteDescription(webrtc.SDPTypeAnswer, answer); err != nil {
+		fmt.Printf("⚠ Failed to set viewer answer: %v\n", err)
+		return
+	}
+
+	fmt.Printf("✓ Viewer answer received\n")
 }

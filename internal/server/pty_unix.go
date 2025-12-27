@@ -175,11 +175,13 @@ func (p *PTY) Fd() uintptr {
 
 // Bridge connects the PTY to a data channel for bidirectional I/O
 type Bridge struct {
-	pty    *PTY
-	send   func([]byte) error
-	done   chan struct{}
-	closed bool
-	mu     sync.Mutex
+	pty         *PTY
+	send        func([]byte) error
+	viewerSends []func([]byte) error // Additional send functions for viewers (read-only)
+	recorder    func([]byte) error   // Optional recording callback
+	done        chan struct{}
+	closed      bool
+	mu          sync.Mutex
 }
 
 // NewBridge creates a bridge between a PTY and a send function
@@ -189,6 +191,27 @@ func NewBridge(pty *PTY, send func([]byte) error) *Bridge {
 		send: send,
 		done: make(chan struct{}),
 	}
+}
+
+// AddViewerSend adds an additional send function for viewer channels (read-only)
+func (b *Bridge) AddViewerSend(send func([]byte) error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.viewerSends = append(b.viewerSends, send)
+}
+
+// ClearViewerSends removes all viewer send functions
+func (b *Bridge) ClearViewerSends() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.viewerSends = nil
+}
+
+// SetRecorder sets the recording callback for PTY output
+func (b *Bridge) SetRecorder(recorder func([]byte) error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.recorder = recorder
 }
 
 // Start begins reading from the PTY and sending to the channel
@@ -218,10 +241,22 @@ func (b *Bridge) readLoop() {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 
+			// Send to primary (control) channel
 			if err := b.send(data); err != nil {
 				b.Close()
 				return
 			}
+
+			// Send to viewer channels (best effort - don't fail if viewers disconnect)
+			b.mu.Lock()
+			for _, viewerSend := range b.viewerSends {
+				viewerSend(data) // Ignore errors for viewers
+			}
+			// Record if recorder is set (best effort - don't fail on recording errors)
+			if b.recorder != nil {
+				b.recorder(data)
+			}
+			b.mu.Unlock()
 		}
 	}
 }

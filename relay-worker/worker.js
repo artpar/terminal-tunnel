@@ -239,7 +239,7 @@ export default {
 
     // POST /session - create new session
     if (path === '/session' && request.method === 'POST') {
-      const { sdp, salt } = await request.json();
+      const { sdp, salt, viewer_sdp, viewer_key } = await request.json();
       if (!sdp) {
         return new Response(JSON.stringify({ error: 'SDP required' }), {
           status: 400,
@@ -252,7 +252,23 @@ export default {
         expirationTtl: EXPIRY_SECONDS
       });
 
-      return new Response(JSON.stringify({ code, expires_in: EXPIRY_SECONDS }), {
+      const response = { code, expires_in: EXPIRY_SECONDS };
+
+      // If viewer session requested, create it with V suffix
+      if (viewer_sdp && viewer_key) {
+        const viewerCode = code + 'V';
+        await env.SESSIONS.put(viewerCode, JSON.stringify({
+          sdp: viewer_sdp,
+          key: viewer_key,
+          read_only: true,
+          answer: null
+        }), {
+          expirationTtl: EXPIRY_SECONDS
+        });
+        response.viewer_code = viewerCode;
+      }
+
+      return new Response(JSON.stringify(response), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
@@ -271,6 +287,21 @@ export default {
       }
 
       const session = JSON.parse(data);
+
+      // Check if this is a viewer session (code ends with V)
+      if (session.read_only) {
+        // Viewer session - return key instead of salt
+        return new Response(JSON.stringify({
+          sdp: session.sdp,
+          key: session.key,
+          read_only: true,
+          used: session.answer !== null
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Normal control session
       return new Response(JSON.stringify({
         sdp: session.sdp,
         salt: session.salt,

@@ -97,3 +97,17 @@ const (
 	// SaltSize is the size of the salt in bytes
 	SaltSize = 16
 )
+
+// ViewerSessionInfo contains info about a viewer session
+type ViewerSessionInfo struct {
+	ViewerCode string `json:"viewer_code"` // Code with V suffix (e.g., WXYZ5678V)
+	ViewerURL  string `json:"viewer_url"`  // Full URL for viewers
+}
+
+// ViewerSessionResponse is the response when fetching a viewer session
+type ViewerSessionResponse struct {
+	SDP      string `json:"sdp"`
+	Key      string `json:"key"`       // Base64-encoded encryption key (no password needed)
+	ReadOnly bool   `json:"read_only"` // Always true for viewer sessions
+	Used     bool   `json:"used"`      // True if a viewer already connected
+}

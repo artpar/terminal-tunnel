@@ -196,11 +196,14 @@ func (d *Daemon) handleSessionStart(req *Request) *Response {
 	}
 
 	result := StartSessionResult{
-		ID:        info.ID,
-		ShortCode: info.ShortCode,
-		Password:  info.Password,
-		ClientURL: info.ClientURL,
-		Status:    string(info.Status),
+		ID:         info.ID,
+		ShortCode:  info.ShortCode,
+		Password:   info.Password,
+		ClientURL:  info.ClientURL,
+		Status:     string(info.Status),
+		Public:     info.Public,
+		ViewerCode: info.ViewerCode,
+		ViewerURL:  info.ViewerURL,
 	}
 
 	resp, err := NewSuccessResponse(req.ID, result)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/artpar/terminal-tunnel/internal/client"
 	"github.com/artpar/terminal-tunnel/internal/daemon"
+	"github.com/artpar/terminal-tunnel/internal/recording"
 	"github.com/artpar/terminal-tunnel/internal/signaling/relayserver"
 )
 
@@ -122,14 +123,42 @@ Example:
 	RunE: runRelay,
 }
 
+// Recording commands
+var playCmd = &cobra.Command{
+	Use:   "play <file>",
+	Short: "Play back a recorded session",
+	Long: `Play back a previously recorded terminal session.
+
+Recordings are stored in ~/.tt/recordings/ in asciicast v2 format
+and can be played with this command or with asciinema.
+
+Example:
+  tt play ~/.tt/recordings/2024-01-01_12-00-00_ABC123.cast
+  tt play --speed 2 recording.cast`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPlay,
+}
+
+var recordingsCmd = &cobra.Command{
+	Use:   "recordings",
+	Short: "List recorded sessions",
+	Long:  `List all recorded terminal sessions in ~/.tt/recordings/`,
+	RunE:  runRecordings,
+}
+
 var (
 	// Session start flags
 	password string
 	shell    string
 	noTURN   bool
+	public   bool
+	record   bool
 
 	// Relay flags
 	relayPort int
+
+	// Play flags
+	playSpeed float64
 )
 
 func init() {
@@ -148,13 +177,22 @@ func init() {
 	// Relay command
 	rootCmd.AddCommand(relayCmd)
 
+	// Recording commands
+	rootCmd.AddCommand(playCmd)
+	rootCmd.AddCommand(recordingsCmd)
+
 	// Start command flags
 	startCmd.Flags().StringVarP(&password, "password", "p", "", "Session password (auto-generated if not provided)")
 	startCmd.Flags().StringVarP(&shell, "shell", "s", "", "Shell to run (default: $SHELL or /bin/sh)")
 	startCmd.Flags().BoolVar(&noTURN, "no-turn", false, "Disable TURN relay (P2P only, may fail with symmetric NAT)")
+	startCmd.Flags().BoolVar(&public, "public", false, "Enable public viewer mode (read-only viewers without password)")
+	startCmd.Flags().BoolVar(&record, "record", false, "Record session to ~/.tt/recordings/")
 
 	// Relay command flags
 	relayCmd.Flags().IntVar(&relayPort, "port", 8765, "Port to listen on for WebSocket connections")
+
+	// Play command flags
+	playCmd.Flags().Float64Var(&playSpeed, "speed", 1.0, "Playback speed (e.g., 2.0 for 2x speed)")
 }
 
 func runDaemonStart(cmd *cobra.Command, args []string) error {
@@ -241,21 +279,29 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	result, err := c.StartSession(password, shell, noTURN)
+	result, err := c.StartSession(password, shell, noTURN, public, record)
 	if err != nil {
 		return fmt.Errorf("failed to start session: %w", err)
 	}
 
 	fmt.Printf("\nSession started:\n")
-	fmt.Printf("  ID:       %s\n", result.ID)
+	fmt.Printf("  ID:         %s\n", result.ID)
 	if result.ShortCode != "" {
-		fmt.Printf("  Code:     %s\n", result.ShortCode)
+		fmt.Printf("  Code:       %s\n", result.ShortCode)
 	}
-	fmt.Printf("  Password: %s\n", result.Password)
+	fmt.Printf("  Password:   %s\n", result.Password)
 	if result.ClientURL != "" {
-		fmt.Printf("  URL:      %s\n", result.ClientURL)
+		fmt.Printf("  Control URL: %s\n", result.ClientURL)
 	}
-	fmt.Printf("  Status:   %s\n", result.Status)
+	fmt.Printf("  Status:     %s\n", result.Status)
+
+	// Display viewer info if public mode
+	if result.Public && result.ViewerCode != "" {
+		fmt.Printf("\n  Viewer Code: %s (read-only, no password)\n", result.ViewerCode)
+		if result.ViewerURL != "" {
+			fmt.Printf("  Viewer URL:  %s\n", result.ViewerURL)
+		}
+	}
 	fmt.Println()
 
 	return nil
@@ -367,5 +413,91 @@ func formatAge(d time.Duration) string {
 		return "1 day ago"
 	}
 	return fmt.Sprintf("%d days ago", days)
+}
+
+func runPlay(cmd *cobra.Command, args []string) error {
+	path := args[0]
+
+	// Load recording
+	rec, err := recording.LoadRecording(path)
+	if err != nil {
+		return fmt.Errorf("failed to load recording: %w", err)
+	}
+
+	fmt.Printf("Playing: %s\n", path)
+	fmt.Printf("Size: %dx%d, Duration: %v, Events: %d\n",
+		rec.Header.Width, rec.Header.Height,
+		rec.Duration().Round(time.Second), rec.EventCount())
+	fmt.Printf("Speed: %.1fx\n\n", playSpeed)
+	fmt.Printf("Press Ctrl+C to stop playback\n\n")
+
+	// Set up signal handler
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Create player
+	player := recording.NewPlayer(rec, os.Stdout)
+	player.SetSpeed(playSpeed)
+
+	// Play in goroutine so we can handle signals
+	done := make(chan error, 1)
+	go func() {
+		done <- player.Play()
+	}()
+
+	// Wait for completion or signal
+	select {
+	case err := <-done:
+		if err != nil {
+			return err
+		}
+	case <-sigCh:
+		player.Stop()
+		fmt.Printf("\n\nPlayback stopped\n")
+	}
+
+	fmt.Printf("\n\nPlayback complete\n")
+	return nil
+}
+
+func runRecordings(cmd *cobra.Command, args []string) error {
+	recordings, err := recording.ListRecordings()
+	if err != nil {
+		return fmt.Errorf("failed to list recordings: %w", err)
+	}
+
+	if len(recordings) == 0 {
+		fmt.Printf("No recordings found in %s\n", recording.GetRecordingsDir())
+		fmt.Println("\nRecord a session with: tt start --record")
+		return nil
+	}
+
+	fmt.Printf("Recordings in %s:\n\n", recording.GetRecordingsDir())
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tSIZE\tCREATED")
+	for _, r := range recordings {
+		size := formatSize(r.Size)
+		age := formatAge(time.Since(r.ModTime))
+		fmt.Fprintf(w, "%s\t%s\t%s\n", r.Name, size, age)
+	}
+	w.Flush()
+
+	fmt.Printf("\nPlay with: tt play <file>\n")
+	return nil
+}
+
+// formatSize formats a byte count as human-readable
+func formatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
