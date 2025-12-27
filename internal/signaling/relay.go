@@ -59,7 +59,7 @@ func (r *RelayClient) ConnectAsHost(offer string) error {
 		Role:      RoleHost,
 	}
 	if err := r.sendMessage(regMsg); err != nil {
-		r.conn.Close()
+		_ = r.conn.Close()
 		return fmt.Errorf("failed to register: %w", err)
 	}
 
@@ -71,7 +71,7 @@ func (r *RelayClient) ConnectAsHost(offer string) error {
 		Salt:      r.salt,
 	}
 	if err := r.sendMessage(offerMsg); err != nil {
-		r.conn.Close()
+		_ = r.conn.Close()
 		return fmt.Errorf("failed to send offer: %w", err)
 	}
 
@@ -84,7 +84,7 @@ func (r *RelayClient) WaitForAnswer(timeout time.Duration) (string, error) {
 		return "", fmt.Errorf("not connected")
 	}
 
-	r.conn.SetReadDeadline(time.Now().Add(timeout))
+	_ = r.conn.SetReadDeadline(time.Now().Add(timeout))
 
 	for {
 		_, data, err := r.conn.ReadMessage()
@@ -138,17 +138,17 @@ func (r *RelayClient) ConnectAsClient(sessionID string) (offer, salt string, err
 		Role:      RoleClient,
 	}
 	if err := r.sendMessage(regMsg); err != nil {
-		r.conn.Close()
+		_ = r.conn.Close()
 		return "", "", fmt.Errorf("failed to register: %w", err)
 	}
 
 	// Wait for offer
-	r.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	_ = r.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 	for {
 		_, data, err := r.conn.ReadMessage()
 		if err != nil {
-			r.conn.Close()
+			_ = r.conn.Close()
 			return "", "", fmt.Errorf("failed to read offer: %w", err)
 		}
 
@@ -161,7 +161,7 @@ func (r *RelayClient) ConnectAsClient(sessionID string) (offer, salt string, err
 		case MsgTypeOffer:
 			return msg.SDP, msg.Salt, nil
 		case MsgTypeError:
-			r.conn.Close()
+			_ = r.conn.Close()
 			return "", "", fmt.Errorf("relay error: %s", msg.Error)
 		}
 	}

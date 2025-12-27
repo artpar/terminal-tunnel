@@ -127,7 +127,6 @@ type Peer struct {
 
 	// Callbacks
 	onDataChannel func(*webrtc.DataChannel)
-	onICEDone     func()
 
 	mu sync.Mutex
 }

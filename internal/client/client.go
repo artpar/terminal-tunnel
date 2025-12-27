@@ -31,7 +31,7 @@ func (c *Client) call(method string, params interface{}) (*daemon.Response, erro
 	defer conn.Close()
 
 	// Set deadlines
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	// Build request
 	req := daemon.Request{

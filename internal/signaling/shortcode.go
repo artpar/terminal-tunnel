@@ -249,13 +249,13 @@ func (c *ShortCodeClient) WaitForAnswerWithContext(ctx context.Context) (string,
 		}
 
 		if resp.StatusCode == http.StatusNotFound {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return "", fmt.Errorf("session expired or not found")
 		}
 
 		var result AnswerPollResponse
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()
@@ -263,7 +263,7 @@ func (c *ShortCodeClient) WaitForAnswerWithContext(ctx context.Context) (string,
 				continue
 			}
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if result.SDP != "" {
 			return result.SDP, nil
@@ -356,13 +356,13 @@ func (c *ShortCodeClient) WaitForViewerAnswerWithContext(ctx context.Context) (s
 		}
 
 		if resp.StatusCode == http.StatusNotFound {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return "", fmt.Errorf("viewer session expired or not found")
 		}
 
 		var result AnswerPollResponse
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()
@@ -370,7 +370,7 @@ func (c *ShortCodeClient) WaitForViewerAnswerWithContext(ctx context.Context) (s
 				continue
 			}
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if result.SDP != "" {
 			return result.SDP, nil

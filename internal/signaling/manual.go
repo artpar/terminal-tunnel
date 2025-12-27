@@ -99,8 +99,8 @@ func (m *ManualSignaling) CompactOffer() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create compressor: %w", err)
 	}
-	writer.Write([]byte(strippedSDP))
-	writer.Close()
+	_, _ = writer.Write([]byte(strippedSDP))
+	_ = writer.Close()
 	compressed := buf.Bytes()
 
 	// Build compact format: version + salt + compressed_sdp
@@ -161,8 +161,8 @@ func CompactAnswer(answer string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create compressor: %w", err)
 	}
-	writer.Write([]byte(answer))
-	writer.Close()
+	_, _ = writer.Write([]byte(answer))
+	_ = writer.Close()
 	compressed := buf.Bytes()
 
 	// Build compact format: version + compressed_sdp

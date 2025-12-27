@@ -70,20 +70,20 @@ func (d *Daemon) Start() error {
 
 	// Remove stale socket
 	socketPath := GetSocketPath()
-	os.Remove(socketPath)
+	_ = os.Remove(socketPath) // Best effort cleanup
 
 	// Create Unix socket listener
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
-		RemovePID()
+		_ = RemovePID() // Best effort cleanup
 		return fmt.Errorf("failed to create socket: %w", err)
 	}
 	d.listener = listener
 
 	// Set socket permissions
 	if err := os.Chmod(socketPath, 0600); err != nil {
-		d.listener.Close()
-		RemovePID()
+		_ = d.listener.Close() // Best effort cleanup
+		_ = RemovePID()        // Best effort cleanup
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 
@@ -144,7 +144,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	// Set read deadline
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadBytes('\n')
@@ -307,7 +307,7 @@ func (d *Daemon) sendResponse(conn net.Conn, resp *Response) {
 	if err != nil {
 		return
 	}
-	conn.Write(append(data, '\n'))
+	_, _ = conn.Write(append(data, '\n'))
 }
 
 // Shutdown gracefully shuts down the daemon
@@ -329,7 +329,7 @@ func (d *Daemon) Shutdown() {
 
 	// Close listener
 	if d.listener != nil {
-		d.listener.Close()
+		_ = d.listener.Close()
 	}
 
 	// Wait for connections to finish

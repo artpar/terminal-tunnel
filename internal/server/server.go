@@ -500,7 +500,7 @@ func (s *Server) Stop() error {
 		s.peer.Close()
 	}
 	if s.viewerPeer != nil {
-		s.viewerPeer.Close()
+		_ = s.viewerPeer.Close()
 	}
 	if s.upnpClose != nil {
 		s.upnpClose()
@@ -509,7 +509,7 @@ func (s *Server) Stop() error {
 	if s.recorder != nil {
 		path := s.recorder.Path()
 		duration := s.recorder.Duration()
-		s.recorder.Close()
+		_ = s.recorder.Close()
 		fmt.Printf("✓ Recording saved: %s (duration: %v)\n", path, duration.Round(time.Second))
 	}
 	return nil
@@ -591,7 +591,11 @@ func (s *Server) startHTTPSignaling(offer, saltB64 string) (string, error) {
 		return "", fmt.Errorf("failed to start signaling: %w", err)
 	}
 
-	port := uint16(sig.Port())
+	sigPort := sig.Port()
+	if sigPort < 0 || sigPort > 65535 {
+		return "", fmt.Errorf("invalid port number: %d", sigPort)
+	}
+	port := uint16(sigPort)
 
 	// Try UPnP port mapping
 	localIP, err := GetLocalIP()
@@ -612,13 +616,13 @@ func (s *Server) startHTTPSignaling(offer, saltB64 string) (string, error) {
 		fmt.Printf("⚠ UPnP not available: %v\n", err)
 		// If UPnP failed and relay is available, switch to relay
 		if s.opts.RelayURL != "" && !s.opts.NoRelay {
-			s.signaling.Close()
+			_ = s.signaling.Close()
 			s.signaling = nil
 			return s.startRelaySignaling(offer, saltB64)
 		}
 		// If no relay, fall back to manual
 		if !upnpMapped {
-			s.signaling.Close()
+			_ = s.signaling.Close()
 			s.signaling = nil
 			return s.startManualSignaling(offer)
 		}
@@ -734,14 +738,14 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 		// Create viewer data channel
 		viewerDC, err := viewerPeer.CreateDataChannel("terminal")
 		if err != nil {
-			viewerPeer.Close()
+			_ = viewerPeer.Close()
 			return "", fmt.Errorf("failed to create viewer data channel: %w", err)
 		}
 
 		// Create viewer SDP offer
 		viewerOffer, err := viewerPeer.CreateOffer()
 		if err != nil {
-			viewerPeer.Close()
+			_ = viewerPeer.Close()
 			return "", fmt.Errorf("failed to create viewer offer: %w", err)
 		}
 
@@ -751,7 +755,7 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 		// Create session with viewer
 		code, viewerCode, err = client.CreateSessionWithViewer(offer, saltB64, viewerOffer, viewerKeyB64)
 		if err != nil {
-			viewerPeer.Close()
+			_ = viewerPeer.Close()
 			fmt.Printf("⚠ Failed to create session with viewer: %v\n", err)
 			fmt.Printf("Falling back to manual mode...\n")
 			return s.startManualSignaling(offer)

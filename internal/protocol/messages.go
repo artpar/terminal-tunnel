@@ -37,13 +37,21 @@ type ResizePayload struct {
 	Cols uint16
 }
 
+// MaxPayloadSize is the maximum allowed message payload size (64KB - 1)
+const MaxPayloadSize = 65535
+
 // Encode serializes a message to wire format.
 // Format: [1 byte type][2 byte length (big-endian)][payload]
 func (m *Message) Encode() []byte {
 	length := len(m.Payload)
+	if length > MaxPayloadSize {
+		// Truncate if too large - this shouldn't happen in normal operation
+		length = MaxPayloadSize
+		m.Payload = m.Payload[:MaxPayloadSize]
+	}
 	buf := make([]byte, headerSize+length)
 	buf[0] = byte(m.Type)
-	binary.BigEndian.PutUint16(buf[1:3], uint16(length))
+	binary.BigEndian.PutUint16(buf[1:3], uint16(length)) //nolint:gosec // length is bounds-checked above
 	copy(buf[headerSize:], m.Payload)
 	return buf
 }

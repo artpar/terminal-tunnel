@@ -399,7 +399,7 @@ func runStartInteractive() error {
 		OnClientDisconnect: func() {
 			// Client disconnected - restore terminal and show message
 			if oldState != nil {
-				term.Restore(stdinFd, oldState)
+				_ = term.Restore(stdinFd, oldState)
 			}
 			fmt.Printf("\r\n⚠ Client disconnected.\r\n")
 		},
@@ -437,7 +437,7 @@ func runStartInteractive() error {
 						return
 					}
 					if n > 0 {
-						bridge.HandleData(buf[:n])
+						_ = bridge.HandleData(buf[:n])
 					}
 				}
 			}()
@@ -452,7 +452,7 @@ func runStartInteractive() error {
 	defer func() {
 		close(inputDone)
 		if oldState != nil {
-			term.Restore(stdinFd, oldState)
+			_ = term.Restore(stdinFd, oldState)
 		}
 	}()
 
@@ -470,11 +470,11 @@ func runStartInteractive() error {
 	select {
 	case <-sigChan:
 		if oldState != nil {
-			term.Restore(stdinFd, oldState)
+			_ = term.Restore(stdinFd, oldState)
 		}
 		fmt.Printf("\r\n\r\nShutting down...\r\n")
 		cancel()
-		srv.Stop()
+		_ = srv.Stop()
 	case err := <-serverDone:
 		if err != nil && err != context.Canceled {
 			return err
@@ -488,7 +488,7 @@ func runStartInteractive() error {
 // generatePassword creates a random 16-character password
 func generatePassword() string {
 	bytes := make([]byte, 10)
-	rand.Read(bytes)
+	_, _ = rand.Read(bytes) // Ignore error - crypto/rand never fails on modern systems
 	// Use base32 for readable password (no confusing chars like 0/O, 1/l)
 	return strings.ToLower(base32.StdEncoding.EncodeToString(bytes)[:16])
 }
@@ -535,7 +535,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			s.ID, s.ShortCode, s.Status, s.Shell, age)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }
@@ -667,7 +667,7 @@ func runRecordings(cmd *cobra.Command, args []string) error {
 		age := formatAge(time.Since(r.ModTime))
 		fmt.Fprintf(w, "%s\t%s\t%s\n", r.Name, size, age)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Printf("\nPlay with: tt play <file>\n")
 	return nil

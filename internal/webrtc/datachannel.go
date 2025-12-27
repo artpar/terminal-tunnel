@@ -117,15 +117,15 @@ func (ec *EncryptedChannel) handleMessage(data []byte) {
 			}
 		}
 	case protocol.MsgPing:
-		// Respond with pong
-		ec.sendMessage(protocol.NewPongMessage())
+		// Respond with pong (ignore error - best effort response)
+		_ = ec.sendMessage(protocol.NewPongMessage())
 	case protocol.MsgPong:
 		// Update last pong time for keepalive tracking
 		ec.mu.Lock()
 		ec.lastPongTime = time.Now()
 		ec.mu.Unlock()
 	case protocol.MsgClose:
-		ec.Close()
+		_ = ec.Close() // Ignore error on remote-initiated close
 	}
 }
 
@@ -202,8 +202,8 @@ func (ec *EncryptedChannel) Close() error {
 	ec.closed = true
 	ec.mu.Unlock()
 
-	// Try to send close message before closing
-	ec.sendMessage(protocol.NewCloseMessage())
+	// Try to send close message before closing (ignore error - best effort)
+	_ = ec.sendMessage(protocol.NewCloseMessage())
 	return ec.dc.Close()
 }
 

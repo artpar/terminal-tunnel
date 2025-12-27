@@ -110,8 +110,8 @@ func IsDaemonRunning() (bool, int) {
 	}
 	if !IsProcessRunning(pid) {
 		// Stale PID file, clean up
-		RemovePID()
-		RemoveSocket()
+		_ = RemovePID()
+		_ = RemoveSocket()
 		return false, 0
 	}
 	return true, pid
@@ -119,6 +119,6 @@ func IsDaemonRunning() (bool, int) {
 
 // Cleanup removes all daemon state files
 func Cleanup() {
-	RemovePID()
-	RemoveSocket()
+	_ = RemovePID()
+	_ = RemoveSocket()
 }

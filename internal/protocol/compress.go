@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"compress/flate"
+	"fmt"
 	"io"
 	"sync"
 )
@@ -18,11 +19,8 @@ var compressorPool = sync.Pool{
 	},
 }
 
-var decompressorPool = sync.Pool{
-	New: func() interface{} {
-		return flate.NewReader(nil)
-	},
-}
+// MaxDecompressedSize limits decompression to prevent zip bombs (10MB)
+const MaxDecompressedSize = 10 * 1024 * 1024
 
 // Compress compresses data using DEFLATE if it's above threshold
 // Returns original data if compression doesn't reduce size
@@ -55,14 +53,20 @@ func Compress(data []byte) ([]byte, bool) {
 	return data, false
 }
 
-// Decompress decompresses DEFLATE-compressed data
+// Decompress decompresses DEFLATE-compressed data with size limit to prevent zip bombs
 func Decompress(data []byte) ([]byte, error) {
 	r := flate.NewReader(bytes.NewReader(data))
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
+	// Limit decompression size to prevent zip bombs
+	limitedReader := io.LimitReader(r, MaxDecompressedSize+1)
 	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
+	n, err := io.Copy(&buf, limitedReader)
+	if err != nil {
 		return nil, err
+	}
+	if n > MaxDecompressedSize {
+		return nil, fmt.Errorf("decompressed data exceeds maximum size of %d bytes", MaxDecompressedSize)
 	}
 
 	return buf.Bytes(), nil

@@ -245,10 +245,10 @@ func (rs *RelayServer) cleanupLoop() {
 			if timeSinceActivity > rs.expiration {
 				session.mu.Lock()
 				if session.HostConn != nil {
-					session.HostConn.Close()
+					_ = session.HostConn.Close()
 				}
 				if session.ClientConn != nil {
-					session.ClientConn.Close()
+					_ = session.ClientConn.Close()
 				}
 				if session.AnswerChan != nil {
 					close(session.AnswerChan)
@@ -276,11 +276,11 @@ func (rs *RelayServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Get session ID from query parameter
 	sessionID := r.URL.Query().Get("session")
 	if sessionID == "" {
-		conn.WriteJSON(signaling.RelayMessage{
+		_ = conn.WriteJSON(signaling.RelayMessage{
 			Type:  signaling.MsgTypeError,
 			Error: "session parameter required",
 		})
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 
@@ -339,7 +339,7 @@ func (rs *RelayServer) handleRegister(conn *websocket.Conn, sessionID, role stri
 
 		// If we have an offer, send it to the client
 		if session.Offer != "" {
-			conn.WriteJSON(signaling.RelayMessage{
+			_ = conn.WriteJSON(signaling.RelayMessage{
 				Type:      signaling.MsgTypeOffer,
 				SessionID: sessionID,
 				SDP:       session.Offer,
@@ -364,7 +364,7 @@ func (rs *RelayServer) handleOffer(sessionID, sdp, salt string) {
 
 	// If client is already connected, forward the offer
 	if session.ClientConn != nil {
-		session.ClientConn.WriteJSON(signaling.RelayMessage{
+		_ = session.ClientConn.WriteJSON(signaling.RelayMessage{
 			Type:      signaling.MsgTypeOffer,
 			SessionID: sessionID,
 			SDP:       sdp,
@@ -388,7 +388,7 @@ func (rs *RelayServer) handleAnswer(sessionID, sdp string) {
 	session.mu.Lock()
 	// Forward answer to host
 	if session.HostConn != nil {
-		session.HostConn.WriteJSON(signaling.RelayMessage{
+		_ = session.HostConn.WriteJSON(signaling.RelayMessage{
 			Type:      signaling.MsgTypeAnswer,
 			SessionID: sessionID,
 			SDP:       sdp,
@@ -414,7 +414,7 @@ func (rs *RelayServer) handleDisconnect(sessionID string, conn *websocket.Conn) 
 	rs.mu.RUnlock()
 
 	if !exists {
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 
@@ -428,7 +428,7 @@ func (rs *RelayServer) handleDisconnect(sessionID string, conn *websocket.Conn) 
 	}
 	session.mu.Unlock()
 
-	conn.Close()
+	_ = conn.Close()
 }
 
 // HandleCreateSession handles POST /session - creates a new session with short code
@@ -652,7 +652,7 @@ func (rs *RelayServer) HandleUpdateSession(w http.ResponseWriter, r *http.Reques
 	log.Printf("Session %s updated for reconnection from IP %s", code, clientIP)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // HandleSubmitAnswer handles POST /session/{code}/answer - submits answer SDP
@@ -700,7 +700,7 @@ func (rs *RelayServer) HandleSubmitAnswer(w http.ResponseWriter, r *http.Request
 
 	// Notify via WebSocket if host is connected
 	if session.HostConn != nil {
-		session.HostConn.WriteJSON(signaling.RelayMessage{
+		_ = session.HostConn.WriteJSON(signaling.RelayMessage{
 			Type:      signaling.MsgTypeAnswer,
 			SessionID: session.ID,
 			SDP:       req.SDP,
@@ -717,7 +717,7 @@ func (rs *RelayServer) HandleSubmitAnswer(w http.ResponseWriter, r *http.Request
 	log.Printf("Answer submitted for session %s", code)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // HandlePollAnswer handles GET /session/{code}/answer - polls for answer (long-polling)
@@ -760,7 +760,7 @@ func (rs *RelayServer) HandlePollAnswer(w http.ResponseWriter, r *http.Request) 
 		answer := session.Answer
 		session.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"sdp": answer})
+		_ = json.NewEncoder(w).Encode(map[string]string{"sdp": answer})
 		return
 	}
 	answerChan := session.AnswerChan
@@ -770,10 +770,10 @@ func (rs *RelayServer) HandlePollAnswer(w http.ResponseWriter, r *http.Request) 
 	select {
 	case answer := <-answerChan:
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"sdp": answer})
+		_ = json.NewEncoder(w).Encode(map[string]string{"sdp": answer})
 	case <-time.After(30 * time.Second):
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "waiting"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "waiting"})
 	case <-r.Context().Done():
 		return
 	}
@@ -832,7 +832,7 @@ func (rs *RelayServer) Start(port int) error {
 	mux.HandleFunc("/session/", rs.sessionHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	})
 
 	addr := fmt.Sprintf(":%d", port)
@@ -844,5 +844,12 @@ func (rs *RelayServer) Start(port int) error {
 	log.Printf("  GET  /session/{code}/answer - Poll for answer")
 	log.Printf("  WS   /ws?session={code} - WebSocket connection")
 
-	return http.ListenAndServe(addr, mux)
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	return server.ListenAndServe()
 }
