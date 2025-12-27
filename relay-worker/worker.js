@@ -118,9 +118,8 @@ const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CODE_LENGTH = 8;
 const EXPIRY_SECONDS = 300; // 5 minutes
 
-// Rate limiting
-const RATE_LIMIT_WINDOW = 60; // 1 minute
-const MAX_REQUESTS_PER_IP = 100; // Enough for session creation + polling
+// Rate limiting removed to reduce KV operations
+// Cloudflare has built-in DDoS protection at the edge
 
 // CORS whitelist
 const ALLOWED_ORIGINS = [
@@ -162,28 +161,6 @@ function getCorsHeaders(request) {
   };
 }
 
-// Rate limiting helper - uses fixed window with timestamp
-async function checkRateLimit(request, env) {
-  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const now = Math.floor(Date.now() / 1000);
-  const windowStart = now - (now % RATE_LIMIT_WINDOW);
-  const key = `ratelimit:${ip}:${windowStart}`;
-
-  const current = await env.SESSIONS.get(key);
-  const count = current ? parseInt(current, 10) : 0;
-
-  if (count >= MAX_REQUESTS_PER_IP) {
-    return false;
-  }
-
-  // TTL = time remaining in window + buffer (min 60s for KV)
-  const ttl = Math.max(60, RATE_LIMIT_WINDOW - (now % RATE_LIMIT_WINDOW) + 60);
-  await env.SESSIONS.put(key, String(count + 1), {
-    expirationTtl: ttl
-  });
-
-  return true;
-}
 
 export default {
   async fetch(request, env) {
@@ -201,17 +178,6 @@ export default {
     }
 
     try {
-      // Rate limiting for API endpoints (not landing page)
-      if (path.startsWith('/session')) {
-        const allowed = await checkRateLimit(request, env);
-        if (!allowed) {
-          return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
-            status: 429,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-      }
-
       // Landing page
       if (path === '/' || path === '') {
         return new Response(getLandingPage(clientUrl), {
