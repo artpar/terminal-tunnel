@@ -50,8 +50,7 @@ archives:
         formats:
           - zip
     name_template: >-
-      {{ .ProjectName }}_
-      {{- .Version }}_
+      tt_
       {{- .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
@@ -244,15 +243,15 @@ release:
     ### Direct Download
     ```bash
     # macOS (Apple Silicon)
-    curl -L https://github.com/artpar/terminal-tunnel/releases/download/v{{ .Version }}/terminal-tunnel_{{ .Version }}_darwin_arm64.tar.gz | tar xz
+    curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_darwin_arm64.tar.gz | tar xz
     sudo mv tt /usr/local/bin/
 
     # macOS (Intel)
-    curl -L https://github.com/artpar/terminal-tunnel/releases/download/v{{ .Version }}/terminal-tunnel_{{ .Version }}_darwin_x86_64.tar.gz | tar xz
+    curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_darwin_x86_64.tar.gz | tar xz
     sudo mv tt /usr/local/bin/
 
     # Linux (x86_64)
-    curl -L https://github.com/artpar/terminal-tunnel/releases/download/v{{ .Version }}/terminal-tunnel_{{ .Version }}_linux_x86_64.tar.gz | tar xz
+    curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_linux_x86_64.tar.gz | tar xz
     sudo mv tt /usr/local/bin/
     ```
 
