@@ -209,74 +209,21 @@ scoops:
       email: bot@goreleaser.com
     commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
 
-# Chocolatey (Windows)
-chocolateys:
-  - name: terminal-tunnel
-    title: Terminal Tunnel
-    authors: artpar
-    project_url: https://github.com/artpar/terminal-tunnel
-    license_url: https://github.com/artpar/terminal-tunnel/blob/main/LICENSE
-    require_license_acceptance: false
-    owners: artpar
-    summary: P2P terminal sharing with E2E encryption
-    description: |
-      Terminal Tunnel enables secure, peer-to-peer terminal sharing.
-      Share your terminal with anyone via a web browser with end-to-end encryption.
-    tags: terminal ssh webrtc p2p encryption
-    bug_tracker_url: https://github.com/artpar/terminal-tunnel/issues
-    source_repo: https://push.chocolatey.org/
-    api_key: "{{ .Env.CHOCOLATEY_API_KEY }}"
+# Chocolatey (Windows) - disabled, needs Windows runner
+# See .github/workflows/release.yml chocolatey job instead
+# chocolateys:
+#   - name: terminal-tunnel
+#     ...
 
-# AUR (Arch Linux)
-aurs:
-  - name: terminal-tunnel-bin
-    homepage: https://github.com/artpar/terminal-tunnel
-    description: P2P terminal sharing with E2E encryption
-    maintainers:
-      - "Parth Mudgal <artpar@gmail.com>"
-    license: MIT
-    private_key: "{{ .Env.AUR_SSH_PRIVATE_KEY }}"
-    git_url: "ssh://aur@aur.archlinux.org/terminal-tunnel-bin.git"
-    package: |-
-      # bin
-      install -Dm755 "./tt" "${pkgdir}/usr/bin/tt"
-      # license
-      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/terminal-tunnel/LICENSE"
-      # readme
-      install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/terminal-tunnel/README.md"
-    commit_author:
-      name: goreleaserbot
-      email: bot@goreleaser.com
+# AUR (Arch Linux) - disabled until AUR_SSH_PRIVATE_KEY is configured
+# aurs:
+#   - name: terminal-tunnel-bin
+#     ...
 
-# Snapcraft
-snapcrafts:
-  - id: tt
-    name: terminal-tunnel
-    title: Terminal Tunnel
-    summary: P2P terminal sharing with E2E encryption
-    description: |
-      Terminal Tunnel enables secure, peer-to-peer terminal sharing.
-      Share your terminal with anyone via a web browser with end-to-end encryption.
-
-      Features:
-      - End-to-end encryption with password protection
-      - No account required - just share the code
-      - Works through NAT with WebRTC
-      - Web-based viewer - no client installation needed
-      - Session recording and playback
-    license: MIT
-    grade: stable
-    confinement: classic
-    publish: true
-    channel_templates:
-      - stable
-    apps:
-      tt:
-        command: tt
-        plugs:
-          - network
-          - network-bind
-          - home
+# Snapcraft - disabled, handled separately in workflow
+# snapcrafts:
+#   - id: tt
+#     ...
 
 # Release configuration
 release:
