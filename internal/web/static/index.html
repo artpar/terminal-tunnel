@@ -1039,7 +1039,7 @@
         }
 
         const PONG_TIMEOUT = 15000; // 15 seconds without pong = connection dead
-        const RECONNECT_BASE_DELAY = 1000; // Start with 1 second
+        const RECONNECT_BASE_DELAY = 2000; // Start with 2 seconds (give server time to prepare new offer)
         const RECONNECT_MAX_DELAY = 30000; // Max 30 seconds
 
         function startPingInterval(session) {
@@ -1419,6 +1419,7 @@
             if (!window.visualViewport) return;
 
             const app = document.getElementById('app');
+            let resizeTimeout = null;
 
             function onViewportChange() {
                 // Get visual viewport height (excludes keyboard)
@@ -1426,11 +1427,15 @@
                 // Apply to app container
                 app.style.height = vh + 'px';
 
-                // Refit terminal if active session has one
-                const session = manager.getActiveSession();
-                if (session && session.fitAddon) {
-                    setTimeout(() => session.fitAddon.fit(), 50);
-                }
+                // Debounce terminal refit to avoid excessive resize messages
+                if (resizeTimeout) clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(() => {
+                    const session = manager.getActiveSession();
+                    // Only refit if session is connected (not during connection setup)
+                    if (session && session.fitAddon && session.status === 'connected') {
+                        session.fitAddon.fit();
+                    }
+                }, 150);
             }
 
             window.visualViewport.addEventListener('resize', onViewportChange);

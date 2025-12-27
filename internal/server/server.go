@@ -436,11 +436,15 @@ func (s *Server) Start(ctx ...context.Context) error {
 		case <-s.disconnected:
 			// Client disconnected, clean up and wait for reconnection
 			s.cleanupConnection()
+			// Brief delay before accepting reconnection to avoid race condition
+			// where client reconnects with stale offer
+			time.Sleep(500 * time.Millisecond)
 			continue
 		case <-keepaliveTimeout:
 			// Keepalive timed out - no pong received within timeout
 			fmt.Printf("\n⚠ Connection timed out (no response from client)\n")
 			s.cleanupConnection()
+			time.Sleep(500 * time.Millisecond)
 			continue
 		case <-s.ctx.Done():
 			return s.Stop()
