@@ -28,7 +28,10 @@ import (
 // setSysProcAttr is defined in daemon_unix.go and daemon_windows.go
 
 var (
-	version = "0.1.0"
+	// Version info - set by goreleaser via ldflags
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {
@@ -53,6 +56,10 @@ Example:
   tt stop <code>       # Stop a session
   tt daemon stop       # Stop the daemon`,
 	Version: version,
+}
+
+func init() {
+	rootCmd.SetVersionTemplate(fmt.Sprintf("tt version %s\ncommit: %s\nbuilt: %s\n", version, commit, date))
 }
 
 // Daemon commands

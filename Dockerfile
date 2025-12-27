@@ -1,17 +1,26 @@
-FROM golang:1.24-alpine AS builder
+# Dockerfile for terminal-tunnel
+# Used by goreleaser - expects pre-built binary
 
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
+FROM alpine:3.20
 
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o terminal-tunnel ./cmd/terminal-tunnel
+# Install ca-certificates for HTTPS and tzdata for timezone support
+RUN apk add --no-cache ca-certificates tzdata
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /app/terminal-tunnel .
+# Create non-root user
+RUN adduser -D -u 1000 tt
 
-EXPOSE 8765
+# Copy pre-built binary from goreleaser
+COPY tt /usr/local/bin/tt
 
-CMD ["./terminal-tunnel", "relay", "--port", "8765"]
+# Use non-root user
+USER tt
+
+# Set working directory
+WORKDIR /home/tt
+
+# Expose default relay server port
+EXPOSE 8080
+
+# Default: run relay server
+ENTRYPOINT ["/usr/local/bin/tt"]
+CMD ["relay", "--port", "8080"]

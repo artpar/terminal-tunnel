@@ -1,0 +1,332 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+project_name: terminal-tunnel
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: tt
+    main: ./cmd/terminal-tunnel
+    binary: tt
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      - goos: windows
+        goarch: arm
+      - goos: freebsd
+        goarch: arm
+      - goos: freebsd
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    flags:
+      - -trimpath
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Security
+      regexp: '^.*?sec(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+# Docker images
+dockers:
+  - image_templates:
+      - "ghcr.io/artpar/terminal-tunnel:{{ .Version }}-amd64"
+      - "ghcr.io/artpar/terminal-tunnel:latest-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=P2P terminal sharing with E2E encryption"
+      - "--label=org.opencontainers.image.url=https://github.com/artpar/terminal-tunnel"
+      - "--label=org.opencontainers.image.source=https://github.com/artpar/terminal-tunnel"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+    goos: linux
+    goarch: amd64
+
+  - image_templates:
+      - "ghcr.io/artpar/terminal-tunnel:{{ .Version }}-arm64"
+      - "ghcr.io/artpar/terminal-tunnel:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=P2P terminal sharing with E2E encryption"
+      - "--label=org.opencontainers.image.url=https://github.com/artpar/terminal-tunnel"
+      - "--label=org.opencontainers.image.source=https://github.com/artpar/terminal-tunnel"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+    goos: linux
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "ghcr.io/artpar/terminal-tunnel:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/artpar/terminal-tunnel:{{ .Version }}-amd64"
+      - "ghcr.io/artpar/terminal-tunnel:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/artpar/terminal-tunnel:latest"
+    image_templates:
+      - "ghcr.io/artpar/terminal-tunnel:latest-amd64"
+      - "ghcr.io/artpar/terminal-tunnel:latest-arm64"
+
+# Linux packages (deb, rpm, apk)
+nfpms:
+  - id: packages
+    package_name: terminal-tunnel
+    vendor: artpar
+    homepage: https://github.com/artpar/terminal-tunnel
+    maintainer: Parth Mudgal <artpar@gmail.com>
+    description: P2P terminal sharing with E2E encryption
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+      - archlinux
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    contents:
+      - src: ./README.md
+        dst: /usr/share/doc/terminal-tunnel/README.md
+    deb:
+      lintian_overrides:
+        - statically-linked-binary
+    rpm:
+      group: Applications/Internet
+    overrides:
+      deb:
+        dependencies: []
+      rpm:
+        dependencies: []
+
+# Homebrew tap
+brews:
+  - name: tt
+    repository:
+      owner: artpar
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/artpar/terminal-tunnel
+    description: P2P terminal sharing with E2E encryption
+    license: MIT
+    install: |
+      bin.install "tt"
+    test: |
+      system "#{bin}/tt", "--version"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+
+# Scoop bucket (Windows)
+scoops:
+  - name: terminal-tunnel
+    repository:
+      owner: artpar
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    directory: bucket
+    homepage: https://github.com/artpar/terminal-tunnel
+    description: P2P terminal sharing with E2E encryption
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
+
+# Chocolatey (Windows)
+chocolateys:
+  - name: terminal-tunnel
+    title: Terminal Tunnel
+    authors: artpar
+    project_url: https://github.com/artpar/terminal-tunnel
+    license_url: https://github.com/artpar/terminal-tunnel/blob/main/LICENSE
+    require_license_acceptance: false
+    owners: artpar
+    summary: P2P terminal sharing with E2E encryption
+    description: |
+      Terminal Tunnel enables secure, peer-to-peer terminal sharing.
+      Share your terminal with anyone via a web browser with end-to-end encryption.
+    tags: terminal ssh webrtc p2p encryption
+    bug_tracker_url: https://github.com/artpar/terminal-tunnel/issues
+    source_repo: https://push.chocolatey.org/
+    api_key: "{{ .Env.CHOCOLATEY_API_KEY }}"
+
+# AUR (Arch Linux)
+aurs:
+  - name: terminal-tunnel-bin
+    homepage: https://github.com/artpar/terminal-tunnel
+    description: P2P terminal sharing with E2E encryption
+    maintainers:
+      - "Parth Mudgal <artpar@gmail.com>"
+    license: MIT
+    private_key: "{{ .Env.AUR_SSH_PRIVATE_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/terminal-tunnel-bin.git"
+    package: |-
+      # bin
+      install -Dm755 "./tt" "${pkgdir}/usr/bin/tt"
+      # license
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/terminal-tunnel/LICENSE"
+      # readme
+      install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/terminal-tunnel/README.md"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+
+# Snapcraft
+snapcrafts:
+  - id: tt
+    name: terminal-tunnel
+    title: Terminal Tunnel
+    summary: P2P terminal sharing with E2E encryption
+    description: |
+      Terminal Tunnel enables secure, peer-to-peer terminal sharing.
+      Share your terminal with anyone via a web browser with end-to-end encryption.
+
+      Features:
+      - End-to-end encryption with password protection
+      - No account required - just share the code
+      - Works through NAT with WebRTC
+      - Web-based viewer - no client installation needed
+      - Session recording and playback
+    license: MIT
+    grade: stable
+    confinement: classic
+    publish: true
+    channel_templates:
+      - stable
+    apps:
+      tt:
+        command: tt
+        plugs:
+          - network
+          - network-bind
+          - home
+
+# Release configuration
+release:
+  github:
+    owner: artpar
+    name: terminal-tunnel
+  draft: false
+  prerelease: auto
+  mode: append
+  header: |
+    ## Installation
+
+    ### Package Managers (Recommended)
+    ```bash
+    # macOS/Linux (Homebrew)
+    brew install artpar/tap/tt
+
+    # Windows (Scoop)
+    scoop bucket add artpar https://github.com/artpar/scoop-bucket
+    scoop install terminal-tunnel
+
+    # Windows (Chocolatey)
+    choco install terminal-tunnel
+
+    # Arch Linux (AUR)
+    yay -S terminal-tunnel-bin
+
+    # Snap
+    snap install terminal-tunnel
+
+    # Debian/Ubuntu
+    sudo apt install ./terminal-tunnel_{{ .Version }}_amd64.deb
+    ```
+
+    ### Docker
+    ```bash
+    docker run -it --rm ghcr.io/artpar/terminal-tunnel:{{ .Version }} tt --help
+    ```
+
+    ### Direct Download
+    Download the appropriate archive for your platform from the assets below.
+
+  footer: |
+    ## Quick Start
+    ```bash
+    tt daemon start
+    tt start -p mypassword
+    ```
+
+    **Full Changelog**: https://github.com/artpar/terminal-tunnel/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+announce:
+  skip: true

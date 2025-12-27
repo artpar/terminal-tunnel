@@ -1,17 +1,23 @@
 name: terminal-tunnel
-base: core22
-version: '1.4.1'
+base: core24
+adopt-info: terminal-tunnel
 summary: P2P terminal sharing with E2E encryption
 description: |
-  Share your terminal from anywhere - no signup, no relay servers,
-  just direct encrypted connections.
+  Terminal Tunnel enables secure, peer-to-peer terminal sharing.
+  Share your terminal with anyone via a web browser with end-to-end encryption.
 
   Features:
-  - Zero setup - Single binary, no dependencies
-  - Fully P2P - Direct WebRTC connection
-  - E2E encrypted - Password-derived keys using Argon2id + NaCl SecretBox
-  - Cross-NAT - Works across different networks
-  - Web client - Access from any browser
+  - End-to-end encryption with password protection
+  - No account required - just share the code
+  - Works through NAT with WebRTC
+  - Web-based viewer - no client installation needed
+  - Session recording and playback
+
+  Usage:
+    tt daemon start      # Start the daemon
+    tt start -p mysecret # Start a session
+    tt list              # List all sessions
+    tt stop <code>       # Stop a session
 
 grade: stable
 confinement: classic
@@ -23,6 +29,10 @@ architectures:
 apps:
   tt:
     command: bin/tt
+    plugs:
+      - network
+      - network-bind
+      - home
 
 parts:
   terminal-tunnel:
@@ -30,9 +40,18 @@ parts:
     source: .
     source-type: local
     build-snaps:
-      - go/1.22/stable
+      - go/1.24/stable
     build-environment:
       - CGO_ENABLED: "0"
     override-build: |
-      go build -ldflags="-s -w -X main.version=${SNAPCRAFT_PROJECT_VERSION}" \
+      VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+      COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+      DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+      go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
         -o $SNAPCRAFT_PART_INSTALL/bin/tt ./cmd/terminal-tunnel
+
+      craftctl set version="${VERSION#v}"
+    override-pull: |
+      craftctl default
+      git fetch --tags --force
