@@ -362,6 +362,30 @@ Argon2id(password, salt, time=3, memory=64MB, threads=4) → 256-bit key
 - Even if DTLS compromised, data remains encrypted
 - Relay server (if used) only sees encrypted signaling data
 
+### Relay Server Security
+
+The relay server (D1 database) stores only signaling data, not terminal content:
+
+| Data | Stored | Security Impact if Leaked |
+|------|--------|---------------------------|
+| Session code | Yes | Random 8-char, expires in 5 min |
+| SDP offer/answer | Yes | Connection metadata only |
+| Salt | Yes | Useless without password |
+| Password | **No** | Never transmitted or stored |
+| Encryption key | **No**¹ | Derived client-side from password |
+| Terminal I/O | **No** | Direct P2P, never touches relay |
+
+¹ Exception: Viewer sessions (`--public`) store the key by design (no password required).
+
+**If relay database is compromised:**
+
+| Session Type | Impact |
+|--------------|--------|
+| Normal (password) | **Safe** - attacker cannot derive key without password |
+| Viewer (`--public`) | **Exposed** - key is stored (by design, expires in 5 min) |
+
+**Recommendation:** Don't use `--public` for sensitive sessions.
+
 ## NAT Traversal
 
 | Method | When Used |
