@@ -1208,38 +1208,44 @@
         // ============== Crypto ==============
         // Flag to track if we're using PBKDF2 fallback (for status display)
         let usingPbkdf2Fallback = false;
-        let argon2Available = false;
+        let argon2Checked = false;
 
-        // Check if argon2 is usable (WASM may be blocked by CSP)
-        async function checkArgon2() {
-            try {
-                if (typeof argon2 === 'undefined' || !argon2.hash) {
-                    return false;
-                }
-                // Try a minimal hash to verify WASM works
-                await argon2.hash({
-                    pass: 'test', salt: new Uint8Array(16),
-                    time: 1, mem: 1024, parallelism: 1, hashLen: 32,
-                    type: argon2.ArgonType.Argon2id
-                });
-                return true;
-            } catch (e) {
-                console.warn('Argon2 not available:', e.message);
-                return false;
-            }
+        // Detect if we're on GitHub Pages or other CSP-restricted environments
+        function isCSPRestricted() {
+            const hostname = window.location.hostname;
+            // GitHub Pages blocks WebAssembly via CSP
+            if (hostname.endsWith('.github.io')) return true;
+            // Add other known restricted hosts here
+            return false;
+        }
+
+        // Initialize fallback detection immediately
+        if (isCSPRestricted()) {
+            console.log('GitHub Pages detected, using PBKDF2 (Argon2 WASM blocked by CSP)');
+            usingPbkdf2Fallback = true;
+            argon2Checked = true;
         }
 
         async function deriveKey(password, saltBytes) {
-            // Check argon2 availability once
-            if (!usingPbkdf2Fallback && !argon2Available) {
-                argon2Available = await checkArgon2();
-                if (!argon2Available) {
-                    console.warn('Argon2 WASM blocked by CSP, using PBKDF2 fallback');
+            // If not yet checked and not on restricted host, try argon2
+            if (!argon2Checked && !usingPbkdf2Fallback) {
+                argon2Checked = true;
+                try {
+                    if (typeof argon2 !== 'undefined' && argon2.hash) {
+                        const result = await argon2.hash({
+                            pass: password, salt: saltBytes,
+                            time: 3, mem: 65536, parallelism: 4, hashLen: 32,
+                            type: argon2.ArgonType.Argon2id
+                        });
+                        return new Uint8Array(result.hash);
+                    }
+                } catch (argonError) {
+                    console.warn('Argon2 failed, using PBKDF2 fallback:', argonError.message);
                     usingPbkdf2Fallback = true;
                 }
             }
 
-            if (argon2Available) {
+            if (!usingPbkdf2Fallback && typeof argon2 !== 'undefined' && argon2.hash) {
                 try {
                     const result = await argon2.hash({
                         pass: password, salt: saltBytes,
