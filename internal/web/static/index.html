@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <!-- Security: Content Security Policy to prevent XSS and data exfiltration -->
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
@@ -19,11 +19,20 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             height: 100%;
+            height: 100dvh; /* Dynamic viewport height - accounts for mobile keyboard */
             background: #1a1a2e;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             overflow: hidden;
         }
-        #app { height: 100%; display: flex; flex-direction: column; }
+        #app {
+            height: 100%;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            /* Ensure app resizes with visual viewport */
+            max-height: 100%;
+            max-height: 100dvh;
+        }
 
         /* Tab bar */
         .tab-bar {
@@ -1405,8 +1414,35 @@
             });
         }
 
+        // ============== Mobile Keyboard Handling ==============
+        function setupMobileViewport() {
+            if (!window.visualViewport) return;
+
+            const app = document.getElementById('app');
+
+            function onViewportChange() {
+                // Get visual viewport height (excludes keyboard)
+                const vh = window.visualViewport.height;
+                // Apply to app container
+                app.style.height = vh + 'px';
+
+                // Refit terminal if active session has one
+                const session = manager.getActiveSession();
+                if (session && session.fitAddon) {
+                    setTimeout(() => session.fitAddon.fit(), 50);
+                }
+            }
+
+            window.visualViewport.addEventListener('resize', onViewportChange);
+            window.visualViewport.addEventListener('scroll', onViewportChange);
+
+            // Initial call
+            onViewportChange();
+        }
+
         // ============== Start ==============
         init();
+        setupMobileViewport();
     })();
     </script>
 </body>
