@@ -2,9 +2,10 @@ name = "terminal-tunnel-relay"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 
-[[kv_namespaces]]
-binding = "SESSIONS"
-id = "1d0a1118abe046f5a2e72cff02688bea"
+[[d1_databases]]
+binding = "DB"
+database_name = "terminal-tunnel-sessions"
+database_id = "cad6878e-ff6b-4454-8284-6b9c04d6abd7"
 
 # Optional: Set custom web client URL for forked deployments
 # Uncomment and modify to point to your hosted web client

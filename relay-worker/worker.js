@@ -1,8 +1,5 @@
-// Cloudflare Worker for terminal-tunnel relay
+// Cloudflare Worker for terminal-tunnel relay (D1 backend)
 // Deploy: wrangler deploy
-//
-// Environment variables (set in wrangler.toml or dashboard):
-//   CLIENT_URL - Web client URL (default: https://artpar.github.io/terminal-tunnel)
 
 const DEFAULT_CLIENT_URL = 'https://artpar.github.io/terminal-tunnel';
 
@@ -114,21 +111,8 @@ const serviceWorker = "self.addEventListener('install', e => self.skipWaiting())
   "});";
 
 const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-// Security: 8 chars = 31^8 = 852 billion possibilities (vs 31^6 = 887 million)
 const CODE_LENGTH = 8;
 const EXPIRY_SECONDS = 300; // 5 minutes
-
-// Rate limiting removed to reduce KV operations
-// Cloudflare has built-in DDoS protection at the edge
-
-// CORS whitelist
-const ALLOWED_ORIGINS = [
-  'https://artpar.github.io',
-  'http://localhost',
-  'http://localhost:8080',
-  'http://127.0.0.1',
-  'http://127.0.0.1:8080'
-];
 
 function generateCode() {
   let code = '';
@@ -138,22 +122,8 @@ function generateCode() {
   return code;
 }
 
-// Check if origin is allowed
-function isAllowedOrigin(origin) {
-  if (!origin) return false;
-  return ALLOWED_ORIGINS.some(allowed => {
-    if (allowed.endsWith(':8080') || allowed.endsWith(':3000')) {
-      return origin === allowed;
-    }
-    return origin === allowed || origin.startsWith(allowed + ':');
-  });
-}
-
-// Get CORS headers for a request
 function getCorsHeaders(request) {
   const origin = request.headers.get('Origin');
-  // Allow all origins for API endpoints (clients may be self-hosted)
-  // The security is in the short code + password, not CORS
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, OPTIONS',
@@ -161,16 +131,17 @@ function getCorsHeaders(request) {
   };
 }
 
+// Check if session is expired
+function isExpired(createdAt) {
+  const now = Math.floor(Date.now() / 1000);
+  return (now - createdAt) > EXPIRY_SECONDS;
+}
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
-
-    // Get client URL from environment or use default
     const clientUrl = env.CLIENT_URL || DEFAULT_CLIENT_URL;
-
-    // CORS headers - must be available for error responses too
     const corsHeaders = getCorsHeaders(request);
 
     if (request.method === 'OPTIONS') {
@@ -215,23 +186,20 @@ export default {
         }
 
         const code = generateCode();
-        await env.SESSIONS.put(code, JSON.stringify({ sdp, salt, answer: null }), {
-          expirationTtl: EXPIRY_SECONDS
-        });
+        const now = Math.floor(Date.now() / 1000);
+
+        await env.DB.prepare(
+          'INSERT INTO sessions (code, sdp, salt, created_at) VALUES (?, ?, ?, ?)'
+        ).bind(code, sdp, salt, now).run();
 
         const response = { code, expires_in: EXPIRY_SECONDS };
 
         // If viewer session requested, create it with V suffix
         if (viewer_sdp && viewer_key) {
           const viewerCode = code + 'V';
-          await env.SESSIONS.put(viewerCode, JSON.stringify({
-            sdp: viewer_sdp,
-            key: viewer_key,
-            read_only: true,
-            answer: null
-          }), {
-            expirationTtl: EXPIRY_SECONDS
-          });
+          await env.DB.prepare(
+            'INSERT INTO sessions (code, sdp, key, read_only, created_at) VALUES (?, ?, ?, 1, ?)'
+          ).bind(viewerCode, viewer_sdp, viewer_key, now).run();
           response.viewer_code = viewerCode;
         }
 
@@ -244,20 +212,19 @@ export default {
       const sessionMatch = path.match(/^\/session\/([A-Z0-9]+)$/i);
       if (sessionMatch && request.method === 'GET') {
         const code = sessionMatch[1].toUpperCase();
-        const data = await env.SESSIONS.get(code);
+        const session = await env.DB.prepare(
+          'SELECT * FROM sessions WHERE code = ?'
+        ).bind(code).first();
 
-        if (!data) {
+        if (!session || isExpired(session.created_at)) {
           return new Response(JSON.stringify({ error: 'Session not found' }), {
             status: 404,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
 
-        const session = JSON.parse(data);
-
-        // Check if this is a viewer session (code ends with V)
+        // Viewer session
         if (session.read_only) {
-          // Viewer session - return key instead of salt
           return new Response(JSON.stringify({
             sdp: session.sdp,
             key: session.key,
@@ -284,7 +251,10 @@ export default {
         const code = updateMatch[1].toUpperCase();
         const { sdp, salt } = await request.json();
 
-        const existing = await env.SESSIONS.get(code);
+        const existing = await env.DB.prepare(
+          'SELECT code FROM sessions WHERE code = ?'
+        ).bind(code).first();
+
         if (!existing) {
           return new Response(JSON.stringify({ error: 'Session not found' }), {
             status: 404,
@@ -292,10 +262,10 @@ export default {
           });
         }
 
-        // Update session with new offer, clear answer
-        await env.SESSIONS.put(code, JSON.stringify({ sdp, salt, answer: null }), {
-          expirationTtl: EXPIRY_SECONDS
-        });
+        const now = Math.floor(Date.now() / 1000);
+        await env.DB.prepare(
+          'UPDATE sessions SET sdp = ?, salt = ?, answer = NULL, created_at = ? WHERE code = ?'
+        ).bind(sdp, salt, now, code).run();
 
         return new Response(JSON.stringify({ status: 'ok' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -307,7 +277,10 @@ export default {
       if (heartbeatMatch && request.method === 'PATCH') {
         const code = heartbeatMatch[1].toUpperCase();
 
-        const existing = await env.SESSIONS.get(code);
+        const existing = await env.DB.prepare(
+          'SELECT code FROM sessions WHERE code = ?'
+        ).bind(code).first();
+
         if (!existing) {
           return new Response(JSON.stringify({ error: 'Session not found' }), {
             status: 404,
@@ -315,11 +288,10 @@ export default {
           });
         }
 
-        // Re-save with fresh TTL to extend expiration
-        const session = JSON.parse(existing);
-        await env.SESSIONS.put(code, JSON.stringify(session), {
-          expirationTtl: EXPIRY_SECONDS
-        });
+        const now = Math.floor(Date.now() / 1000);
+        await env.DB.prepare(
+          'UPDATE sessions SET created_at = ? WHERE code = ?'
+        ).bind(now, code).run();
 
         return new Response(JSON.stringify({ status: 'ok' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -332,19 +304,20 @@ export default {
         const code = answerPostMatch[1].toUpperCase();
         const { sdp } = await request.json();
 
-        const data = await env.SESSIONS.get(code);
-        if (!data) {
+        const session = await env.DB.prepare(
+          'SELECT code, created_at FROM sessions WHERE code = ?'
+        ).bind(code).first();
+
+        if (!session || isExpired(session.created_at)) {
           return new Response(JSON.stringify({ error: 'Session not found' }), {
             status: 404,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
 
-        const session = JSON.parse(data);
-        session.answer = sdp;
-        await env.SESSIONS.put(code, JSON.stringify(session), {
-          expirationTtl: EXPIRY_SECONDS
-        });
+        await env.DB.prepare(
+          'UPDATE sessions SET answer = ? WHERE code = ?'
+        ).bind(sdp, code).run();
 
         return new Response(JSON.stringify({ status: 'ok' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -355,16 +328,17 @@ export default {
       const answerGetMatch = path.match(/^\/session\/([A-Z0-9]+)\/answer$/i);
       if (answerGetMatch && request.method === 'GET') {
         const code = answerGetMatch[1].toUpperCase();
-        const data = await env.SESSIONS.get(code);
+        const session = await env.DB.prepare(
+          'SELECT answer, created_at FROM sessions WHERE code = ?'
+        ).bind(code).first();
 
-        if (!data) {
+        if (!session || isExpired(session.created_at)) {
           return new Response(JSON.stringify({ error: 'Session not found' }), {
             status: 404,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
 
-        const session = JSON.parse(data);
         if (session.answer) {
           return new Response(JSON.stringify({ sdp: session.answer }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -379,7 +353,6 @@ export default {
       return new Response('Not found', { status: 404, headers: corsHeaders });
 
     } catch (error) {
-      // Always return CORS headers on errors so browser can read error message
       console.error('Worker error:', error.message, error.stack);
       return new Response(JSON.stringify({
         error: 'Internal server error',
