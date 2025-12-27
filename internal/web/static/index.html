@@ -19,19 +19,22 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             height: 100%;
-            height: 100dvh; /* Dynamic viewport height - accounts for mobile keyboard */
+            height: 100dvh;
+            height: 100svh; /* Small viewport height - stable when keyboard shown */
             background: #1a1a2e;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             overflow: hidden;
+            /* Prevent iOS bounce/overscroll */
+            position: fixed;
+            width: 100%;
+            overscroll-behavior: none;
         }
         #app {
             height: 100%;
-            height: 100dvh;
             display: flex;
             flex-direction: column;
-            /* Ensure app resizes with visual viewport */
-            max-height: 100%;
-            max-height: 100dvh;
+            overflow: hidden;
+            /* This will be set dynamically by JS for keyboard */
         }
 
         /* Tab bar */
@@ -1416,33 +1419,53 @@
 
         // ============== Mobile Keyboard Handling ==============
         function setupMobileViewport() {
-            if (!window.visualViewport) return;
-
             const app = document.getElementById('app');
+            const html = document.documentElement;
+            const body = document.body;
             let resizeTimeout = null;
+            let lastHeight = window.innerHeight;
 
-            function onViewportChange() {
-                // Get visual viewport height (excludes keyboard)
-                const vh = window.visualViewport.height;
-                // Apply to app container
-                app.style.height = vh + 'px';
-
-                // Debounce terminal refit to avoid excessive resize messages
-                if (resizeTimeout) clearTimeout(resizeTimeout);
-                resizeTimeout = setTimeout(() => {
-                    const session = manager.getActiveSession();
-                    // Only refit if session is connected (not during connection setup)
-                    if (session && session.fitAddon && session.status === 'connected') {
-                        session.fitAddon.fit();
-                    }
-                }, 150);
+            function setAppHeight(height) {
+                const h = height + 'px';
+                app.style.height = h;
+                html.style.height = h;
+                body.style.height = h;
             }
 
-            window.visualViewport.addEventListener('resize', onViewportChange);
-            window.visualViewport.addEventListener('scroll', onViewportChange);
+            function onViewportChange() {
+                // Use visualViewport if available, fallback to innerHeight
+                const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+
+                // Only update if height actually changed
+                if (Math.abs(vh - lastHeight) > 10) {
+                    lastHeight = vh;
+                    setAppHeight(vh);
+
+                    // Debounce terminal refit
+                    if (resizeTimeout) clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => {
+                        const session = manager.getActiveSession();
+                        if (session && session.fitAddon && session.status === 'connected') {
+                            session.fitAddon.fit();
+                        }
+                    }, 100);
+                }
+            }
+
+            // Listen to all possible resize events
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', onViewportChange);
+                window.visualViewport.addEventListener('scroll', onViewportChange);
+            }
+            window.addEventListener('resize', onViewportChange);
+
+            // Also handle orientation change
+            window.addEventListener('orientationchange', () => {
+                setTimeout(onViewportChange, 100);
+            });
 
             // Initial call
-            onViewportChange();
+            setAppHeight(window.visualViewport ? window.visualViewport.height : window.innerHeight);
         }
 
         // ============== Start ==============

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <!-- Security: Content Security Policy to prevent XSS and data exfiltration -->
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
@@ -19,11 +19,23 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             height: 100%;
+            height: 100dvh;
+            height: 100svh; /* Small viewport height - stable when keyboard shown */
             background: #1a1a2e;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             overflow: hidden;
+            /* Prevent iOS bounce/overscroll */
+            position: fixed;
+            width: 100%;
+            overscroll-behavior: none;
         }
-        #app { height: 100%; display: flex; flex-direction: column; }
+        #app {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            /* This will be set dynamically by JS for keyboard */
+        }
 
         /* Tab bar */
         .tab-bar {
@@ -1030,7 +1042,7 @@
         }
 
         const PONG_TIMEOUT = 15000; // 15 seconds without pong = connection dead
-        const RECONNECT_BASE_DELAY = 1000; // Start with 1 second
+        const RECONNECT_BASE_DELAY = 2000; // Start with 2 seconds (give server time to prepare new offer)
         const RECONNECT_MAX_DELAY = 30000; // Max 30 seconds
 
         function startPingInterval(session) {
@@ -1405,8 +1417,60 @@
             });
         }
 
+        // ============== Mobile Keyboard Handling ==============
+        function setupMobileViewport() {
+            const app = document.getElementById('app');
+            const html = document.documentElement;
+            const body = document.body;
+            let resizeTimeout = null;
+            let lastHeight = window.innerHeight;
+
+            function setAppHeight(height) {
+                const h = height + 'px';
+                app.style.height = h;
+                html.style.height = h;
+                body.style.height = h;
+            }
+
+            function onViewportChange() {
+                // Use visualViewport if available, fallback to innerHeight
+                const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+
+                // Only update if height actually changed
+                if (Math.abs(vh - lastHeight) > 10) {
+                    lastHeight = vh;
+                    setAppHeight(vh);
+
+                    // Debounce terminal refit
+                    if (resizeTimeout) clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => {
+                        const session = manager.getActiveSession();
+                        if (session && session.fitAddon && session.status === 'connected') {
+                            session.fitAddon.fit();
+                        }
+                    }, 100);
+                }
+            }
+
+            // Listen to all possible resize events
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', onViewportChange);
+                window.visualViewport.addEventListener('scroll', onViewportChange);
+            }
+            window.addEventListener('resize', onViewportChange);
+
+            // Also handle orientation change
+            window.addEventListener('orientationchange', () => {
+                setTimeout(onViewportChange, 100);
+            });
+
+            // Initial call
+            setAppHeight(window.visualViewport ? window.visualViewport.height : window.innerHeight);
+        }
+
         // ============== Start ==============
         init();
+        setupMobileViewport();
     })();
     </script>
 </body>
