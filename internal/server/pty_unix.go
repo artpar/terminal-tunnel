@@ -242,8 +242,15 @@ func (b *Bridge) readLoop() {
 		default:
 		}
 
+		// Set a short read deadline so we can check b.done periodically
+		// This makes the read interruptible when CloseWithoutPTY is called
+		b.pty.ptmx.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		n, err := b.pty.Read(buf)
 		if err != nil {
+			// Check if it's a timeout - if so, just continue to check b.done
+			if os.IsTimeout(err) {
+				continue
+			}
 			b.Close()
 			return
 		}

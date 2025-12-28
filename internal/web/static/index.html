@@ -999,9 +999,15 @@
             session.dc.onopen = () => {
                 console.log('[DC] Data channel opened, readyState:', session.dc.readyState);
                 session.status = 'connected';
+                // Clear all reconnection state on successful connection
                 if (session.reconnectAttempts > 0) {
                     console.log('Reconnected successfully after', session.reconnectAttempts, 'attempt(s)');
-                    session.reconnectAttempts = 0; // Reset only when truly connected
+                }
+                session.reconnectAttempts = 0;
+                session.reconnectInProgress = false;
+                if (session.reconnectTimer) {
+                    clearTimeout(session.reconnectTimer);
+                    session.reconnectTimer = null;
                 }
                 // Send immediate ping to let server know our encryption key (Argon2 vs PBKDF2)
                 sendMessage(session, MSG_PING, new Uint8Array(0));
@@ -1047,6 +1053,11 @@
 
         function handleDisconnect(session, autoReconnect = false) {
             if (session.status === 'disconnected') return; // Already disconnected
+            // Don't interrupt an active reconnection attempt
+            if (session.reconnectInProgress && session.status === 'connecting') {
+                console.log('[handleDisconnect] Ignoring disconnect during active reconnection');
+                return;
+            }
             session.status = 'disconnected';
             if (session.pingInterval) {
                 clearInterval(session.pingInterval);
@@ -1089,19 +1100,42 @@
             if (session.reconnectAttempts >= session.maxReconnectAttempts) {
                 console.log('Max reconnect attempts reached');
                 session.reconnectAttempts = 0;
+                session.reconnectInProgress = false;
                 return;
             }
 
+            // Guard against multiple concurrent reconnection attempts
+            if (session.reconnectInProgress) {
+                console.log('Reconnection already in progress, skipping');
+                return;
+            }
+
+            // Cancel any existing reconnect timer
+            if (session.reconnectTimer) {
+                clearTimeout(session.reconnectTimer);
+                session.reconnectTimer = null;
+            }
+
             session.reconnectAttempts++;
-            const delay = Math.min(
-                RECONNECT_BASE_DELAY * Math.pow(2, session.reconnectAttempts - 1),
-                RECONNECT_MAX_DELAY
-            );
+
+            // Use instant reconnect if triggered by visibility restore
+            let delay;
+            if (session.visibilityReconnect) {
+                delay = 0; // Instant reconnect on visibility restore
+                session.visibilityReconnect = false;
+            } else {
+                delay = Math.min(
+                    RECONNECT_BASE_DELAY * Math.pow(2, session.reconnectAttempts - 1),
+                    RECONNECT_MAX_DELAY
+                );
+            }
 
             console.log(`Auto-reconnecting in ${delay}ms (attempt ${session.reconnectAttempts}/${session.maxReconnectAttempts})`);
 
-            setTimeout(async () => {
-                if (session.status === 'disconnected' && session.code) {
+            session.reconnectTimer = setTimeout(async () => {
+                session.reconnectTimer = null;
+                if (session.status === 'disconnected' && session.code && !session.reconnectInProgress) {
+                    session.reconnectInProgress = true;
                     session.status = 'connecting';
                     manager.updateUI();
 
@@ -1126,12 +1160,16 @@
                         // Establish connection (success is handled in dc.onopen)
                         await establishConnection(session, data.sdp, session.code);
                         // Note: reconnectAttempts is reset in dc.onopen when truly connected
+                        session.reconnectInProgress = false;
                     } catch (err) {
                         console.log('Reconnect failed:', err.message);
                         session.status = 'disconnected';
+                        session.reconnectInProgress = false;
                         manager.updateUI();
                         attemptAutoReconnect(session); // Try again
                     }
+                } else {
+                    session.reconnectInProgress = false;
                 }
             }, delay);
         }
@@ -1142,6 +1180,30 @@
                    ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         }
 
+        function cleanupTerminal(session) {
+            // Dispose old terminal and remove event listeners
+            if (session.term) {
+                try { session.term.dispose(); } catch(e) {}
+                session.term = null;
+            }
+            if (session.fitAddon) {
+                session.fitAddon = null;
+            }
+            // Clean up mobile input listeners (will be re-added if needed)
+            const mobileInput = session.terminalScreen?.querySelector('.mobile-input');
+            if (mobileInput && session.mobileInputHandler) {
+                mobileInput.removeEventListener('input', session.mobileInputHandler);
+                mobileInput.removeEventListener('keydown', session.mobileKeyHandler);
+                session.mobileInputHandler = null;
+                session.mobileKeyHandler = null;
+            }
+            // Clear the terminal container
+            const termContainer = session.terminalScreen?.querySelector('.terminal-container');
+            if (termContainer) {
+                termContainer.innerHTML = '';
+            }
+        }
+
         function showTerminal(session) {
             session.connectScreen.classList.remove('active');
             session.terminalScreen.classList.add('active');
@@ -1149,6 +1211,9 @@
             const termContainer = session.terminalScreen.querySelector('.terminal-container');
             const mobileInput = session.terminalScreen.querySelector('.mobile-input');
             const mobile = isMobile();
+
+            // Clean up any existing terminal before creating new one
+            cleanupTerminal(session);
 
             session.term = new Terminal({
                 cursorBlink: !session.readOnly, // Don't blink cursor in read-only mode
@@ -1177,13 +1242,14 @@
             // Mobile input handling (disabled in read-only mode)
             if (mobile && !session.readOnly) {
                 mobileInput.classList.add('active');
-                mobileInput.addEventListener('input', (e) => {
+                // Use named handlers so they can be removed on cleanup
+                session.mobileInputHandler = (e) => {
                     if (e.target.value) {
                         sendMessage(session, MSG_DATA, new TextEncoder().encode(e.target.value));
                         e.target.value = '';
                     }
-                });
-                mobileInput.addEventListener('keydown', (e) => {
+                };
+                session.mobileKeyHandler = (e) => {
                     let data = null;
                     switch (e.key) {
                         case 'Enter': data = '\r'; break;
@@ -1199,7 +1265,10 @@
                         sendMessage(session, MSG_DATA, new TextEncoder().encode(data));
                         e.preventDefault();
                     }
-                });
+                };
+                mobileInput.addEventListener('input', session.mobileInputHandler);
+                mobileInput.addEventListener('keydown', session.mobileKeyHandler);
+                // These are idempotent - adding same listener multiple times is okay
                 termContainer.addEventListener('touchstart', () => mobileInput.focus(), { passive: true });
                 termContainer.addEventListener('click', () => mobileInput.focus());
             } else if (!session.readOnly) {
@@ -1556,6 +1625,80 @@
 
             // Initial call
             updateHeight();
+        }
+
+        // ============== Visibility & Page Lifecycle ==============
+        // Handle page visibility changes (tab switch, minimize, etc.)
+        let wasHiddenAt = null;
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                wasHiddenAt = Date.now();
+                console.log('[Visibility] Page hidden at', new Date().toLocaleTimeString());
+            } else if (document.visibilityState === 'visible') {
+                const hiddenDuration = wasHiddenAt ? Date.now() - wasHiddenAt : 0;
+                console.log('[Visibility] Page visible after', hiddenDuration, 'ms hidden');
+                wasHiddenAt = null;
+
+                // Check all sessions for health
+                manager.sessions.forEach((session) => {
+                    if (session.status === 'connected') {
+                        // Immediately check connection health
+                        if (!session.dc || session.dc.readyState !== 'open') {
+                            console.log('[Visibility] DC not open on restore, triggering reconnect');
+                            handleDisconnect(session, true);
+                        } else {
+                            // Send immediate ping to verify connection is alive
+                            console.log('[Visibility] Sending health check ping');
+                            session.lastPingTime = Date.now();
+                            sendMessage(session, MSG_PING, new Uint8Array(0));
+
+                            // If we were hidden for a while, check pong timeout more aggressively
+                            if (hiddenDuration > 5000) {
+                                setTimeout(() => {
+                                    if (session.status === 'connected' &&
+                                        session.lastPongTime < session.lastPingTime) {
+                                        console.log('[Visibility] No pong after visibility restore, reconnecting');
+                                        handleDisconnect(session, true);
+                                    }
+                                }, 3000); // Wait 3s for pong response
+                            }
+                        }
+                    } else if (session.status === 'disconnected' && session.code && session.password) {
+                        // Was disconnected while hidden - try immediate reconnect
+                        console.log('[Visibility] Was disconnected while hidden, attempting immediate reconnect');
+                        session.visibilityReconnect = true; // Flag for instant reconnect
+                        attemptAutoReconnect(session);
+                    }
+                });
+
+                // Refresh mobile viewport in case keyboard state changed
+                if (window.refreshMobileViewport) window.refreshMobileViewport();
+            }
+        });
+
+        // Page Lifecycle API - handle freeze/resume (more aggressive than visibility)
+        if ('onfreeze' in document) {
+            document.addEventListener('freeze', () => {
+                console.log('[Lifecycle] Page frozen');
+                manager.sessions.forEach((session) => {
+                    session.wasFrozen = true;
+                });
+            });
+
+            document.addEventListener('resume', () => {
+                console.log('[Lifecycle] Page resumed from freeze');
+                manager.sessions.forEach((session) => {
+                    if (session.wasFrozen) {
+                        session.wasFrozen = false;
+                        // Force reconnect after freeze - connection is likely dead
+                        if (session.status === 'connected') {
+                            console.log('[Lifecycle] Forcing reconnect after freeze');
+                            handleDisconnect(session, true);
+                        }
+                    }
+                });
+            });
         }
 
         // ============== Start ==============
