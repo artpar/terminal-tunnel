@@ -1230,6 +1230,18 @@
             session.fitAddon = new FitAddon.FitAddon();
             session.term.loadAddon(session.fitAddon);
             session.term.open(termContainer);
+
+            // Disable autocomplete/autocorrect on xterm's internal textarea (mobile keyboard fix)
+            const xtermTextarea = termContainer.querySelector('textarea');
+            if (xtermTextarea) {
+                xtermTextarea.setAttribute('autocomplete', 'off');
+                xtermTextarea.setAttribute('autocorrect', 'off');
+                xtermTextarea.setAttribute('autocapitalize', 'off');
+                xtermTextarea.setAttribute('spellcheck', 'false');
+                xtermTextarea.setAttribute('data-gramm', 'false'); // Disable Grammarly
+                xtermTextarea.setAttribute('data-gramm_editor', 'false');
+            }
+
             session.fitAddon.fit();
 
             // Only send input if not in read-only mode
