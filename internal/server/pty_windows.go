@@ -5,6 +5,7 @@ package server
 import (
 	"errors"
 	"io"
+	"time"
 )
 
 var ErrWindowsNotSupported = errors.New("PTY not supported on Windows - use WSL")
@@ -61,3 +62,4 @@ func (b *Bridge) AddViewerSend(send func([]byte) error)   {}
 func (b *Bridge) ClearViewerSends()                       {}
 func (b *Bridge) SetRecorder(recorder func([]byte) error) {}
 func (b *Bridge) SetLocalOutput(w io.Writer)              {}
+func (b *Bridge) WaitForExit(timeout time.Duration) bool  { return true }
