@@ -957,10 +957,14 @@
 
             session.pc.onconnectionstatechange = () => {
                 const state = session.pc.connectionState;
-                console.log('Connection state:', state);
+                console.log('[PC] Connection state:', state, 'dc state:', session.dc?.readyState);
                 if (state === 'disconnected' || state === 'failed') {
                     handleDisconnect(session, true); // Auto-reconnect on ICE failure
                 }
+            };
+
+            session.pc.oniceconnectionstatechange = () => {
+                console.log('[ICE] Connection state:', session.pc.iceConnectionState);
             };
 
             await session.pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
@@ -993,6 +997,7 @@
             session.dc.binaryType = 'arraybuffer';
 
             session.dc.onopen = () => {
+                console.log('[DC] Data channel opened, readyState:', session.dc.readyState);
                 session.status = 'connected';
                 if (session.reconnectAttempts > 0) {
                     console.log('Reconnected successfully after', session.reconnectAttempts, 'attempt(s)');
@@ -1002,9 +1007,17 @@
                 showTerminal(session);
                 startPingInterval(session);
                 manager.updateUI();
+                console.log('[DC] Data channel setup complete');
             };
 
-            session.dc.onclose = () => handleDisconnect(session, true); // Auto-reconnect on dc close
+            session.dc.onclose = () => {
+                console.log('[DC] Data channel closed! readyState:', session.dc?.readyState, 'pc state:', session.pc?.connectionState);
+                handleDisconnect(session, true); // Auto-reconnect on dc close
+            };
+
+            session.dc.onerror = (err) => {
+                console.error('[DC] Data channel error:', err);
+            };
 
             session.dc.onmessage = async (event) => {
                 try {
@@ -1041,8 +1054,8 @@
             }
         }
 
-        const PONG_TIMEOUT = 15000; // 15 seconds without pong = connection dead
-        const RECONNECT_BASE_DELAY = 2000; // Start with 2 seconds (give server time to prepare new offer)
+        const PONG_TIMEOUT = 35000; // 35 seconds without pong = connection dead (longer than server's 30s)
+        const RECONNECT_BASE_DELAY = 1000; // Start with 1 second for faster initial reconnect
         const RECONNECT_MAX_DELAY = 30000; // Max 30 seconds
 
         function startPingInterval(session) {
@@ -1064,7 +1077,7 @@
                     console.log('Data channel not open but status is connected, dc state:',
                         session.dc ? session.dc.readyState : 'no dc');
                 }
-            }, 5000);
+            }, 10000); // Match server's 10s ping interval
         }
 
         function attemptAutoReconnect(session) {
