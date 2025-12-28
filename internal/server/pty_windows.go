@@ -162,18 +162,19 @@ func (p *PTY) PID() int {
 
 // Bridge connects the PTY to a data channel for bidirectional I/O
 type Bridge struct {
-	pty         *PTY
-	send        func([]byte) error
-	viewerSends []func([]byte) error // Additional send functions for viewers (read-only)
-	recorder    func([]byte) error   // Optional recording callback
-	localOutput io.Writer            // Optional local output (for interactive mode)
-	done        chan struct{}
-	exited      chan struct{} // Closed when readLoop exits
-	closed      bool
-	paused      bool     // When true, output is buffered instead of sent
-	buffer      []byte   // Ring buffer for output during pause
-	bufferMax   int      // Maximum buffer size (default 64KB)
-	mu          sync.Mutex
+	pty           *PTY
+	send          func([]byte) error
+	viewerSends   []func([]byte) error // Additional send functions for viewers (read-only)
+	recorder      func([]byte) error   // Optional recording callback
+	localOutput   io.Writer            // Optional local output (for interactive mode)
+	done          chan struct{}
+	exited        chan struct{} // Closed when readLoop exits
+	closed        bool
+	paused        bool   // When true, output is buffered instead of sent
+	buffer        []byte // Ring buffer for output during pause
+	historyBuffer []byte // Always-on buffer for late-join viewer replay
+	bufferMax     int    // Maximum buffer size (default 64KB)
+	mu            sync.Mutex
 }
 
 const defaultBufferMax = 64 * 1024 // 64KB default buffer
@@ -233,10 +234,13 @@ func (b *Bridge) AddViewerSend(send func([]byte) error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Send buffered output to new viewer for late-join replay
-	if len(b.buffer) > 0 {
-		fmt.Printf("  [Debug] Sending %d bytes of buffered output to new viewer\n", len(b.buffer))
-		go send(b.buffer) // Non-blocking send
+	// Send history buffer to new viewer for late-join replay
+	if len(b.historyBuffer) > 0 {
+		fmt.Printf("  [Debug] Sending %d bytes of history to new viewer\n", len(b.historyBuffer))
+		// Make a copy to avoid race conditions
+		history := make([]byte, len(b.historyBuffer))
+		copy(history, b.historyBuffer)
+		go send(history) // Non-blocking send
 	}
 
 	b.viewerSends = append(b.viewerSends, send)
@@ -310,6 +314,13 @@ func (b *Bridge) readLoop() {
 			copy(data, buf[:n])
 
 			b.mu.Lock()
+
+			// Always update history buffer for late-join viewer replay
+			b.historyBuffer = append(b.historyBuffer, data...)
+			if len(b.historyBuffer) > b.bufferMax {
+				b.historyBuffer = b.historyBuffer[len(b.historyBuffer)-b.bufferMax:]
+			}
+
 			if b.paused {
 				// Buffer the data instead of sending
 				b.buffer = append(b.buffer, data...)
