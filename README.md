@@ -2,6 +2,10 @@
 
 P2P terminal sharing with end-to-end encryption. Share your terminal from anywhere - no signup, no relay servers, just direct encrypted connections.
 
+## Demo
+
+![Terminal Tunnel Demo](docs/demo.gif)
+
 ## Install
 
 ### Package Managers (Recommended)
