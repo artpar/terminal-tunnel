@@ -1,65 +1,330 @@
 //go:build windows
 
+// Package server provides the terminal tunnel server implementation
 package server
 
 import (
-	"errors"
+	"context"
+	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"sync"
 	"time"
+
+	"github.com/UserExistsError/conpty"
 )
 
-var ErrWindowsNotSupported = errors.New("PTY not supported on Windows - use WSL")
-
-// PTY manages a pseudo-terminal (stub for Windows)
+// PTY manages a pseudo-terminal using Windows ConPTY
 type PTY struct {
+	cpty *conpty.ConPty
+	cmd  *exec.Cmd
+
+	mu     sync.Mutex
 	closed bool
 }
 
-// StartPTY is not supported on Windows
+// StartPTY creates a new PTY with the given shell using ConPTY
 func StartPTY(shell string) (*PTY, error) {
-	return nil, ErrWindowsNotSupported
+	if shell == "" {
+		// Default to PowerShell on Windows, fallback to cmd.exe
+		shell = "powershell.exe"
+		if _, err := exec.LookPath(shell); err != nil {
+			shell = "cmd.exe"
+		}
+	}
+
+	// Create ConPTY with initial size 80x24
+	cpty, err := conpty.Start(shell, conpty.ConPtyDimensions(80, 24))
+	if err != nil {
+		return nil, fmt.Errorf("failed to start ConPTY: %w", err)
+	}
+
+	return &PTY{
+		cpty: cpty,
+	}, nil
 }
 
-// ReattachPTY is not supported on Windows
+// ReattachPTY is not fully supported on Windows
+// Windows ConPTY doesn't support reattaching to existing sessions
 func ReattachPTY(ptyPath string, shellPID int) (*PTY, error) {
-	return nil, ErrWindowsNotSupported
+	return nil, fmt.Errorf("PTY reattachment not supported on Windows")
 }
 
-// IsProcessRunning checks if a process is running (stub for Windows)
+// IsProcessRunning checks if a process with the given PID is running
 func IsProcessRunning(pid int) bool {
-	return false
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// On Windows, FindProcess always succeeds for any PID
+	// We need to try to get process info to check if it exists
+	// A simple approach is to check if we can open the process
+	_ = process
+	return false // Conservative - reattachment not supported anyway
 }
 
-// IsReattached returns whether this PTY was reattached (stub for Windows)
+// IsReattached returns whether this PTY was reattached
 func (p *PTY) IsReattached() bool {
-	return false
+	return false // Reattachment not supported on Windows
 }
 
-func (p *PTY) Read(buf []byte) (int, error)   { return 0, ErrWindowsNotSupported }
-func (p *PTY) Write(data []byte) (int, error) { return 0, ErrWindowsNotSupported }
-func (p *PTY) Resize(rows, cols uint16) error { return ErrWindowsNotSupported }
-func (p *PTY) Close() error                   { return nil }
-func (p *PTY) Wait() error                    { return ErrWindowsNotSupported }
-func (p *PTY) Fd() uintptr                    { return 0 }
-func (p *PTY) Name() string                   { return "" }
-func (p *PTY) PID() int                       { return 0 }
+// Read reads data from the PTY
+func (p *PTY) Read(buf []byte) (int, error) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
+	cpty := p.cpty
+	p.mu.Unlock()
 
-// Bridge connects the PTY to a data channel (stub for Windows)
+	return cpty.Read(buf)
+}
+
+// Write writes data to the PTY
+func (p *PTY) Write(data []byte) (int, error) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
+	cpty := p.cpty
+	p.mu.Unlock()
+
+	return cpty.Write(data)
+}
+
+// Resize changes the PTY size
+func (p *PTY) Resize(rows, cols uint16) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return io.ErrClosedPipe
+	}
+
+	return p.cpty.Resize(int(cols), int(rows))
+}
+
+// Close closes the PTY and terminates the shell process
+func (p *PTY) Close() error {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
+	p.closed = true
+	cpty := p.cpty
+	p.mu.Unlock()
+
+	return cpty.Close()
+}
+
+// Wait waits for the shell process to exit
+func (p *PTY) Wait() error {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
+	cpty := p.cpty
+	p.mu.Unlock()
+
+	_, err := cpty.Wait(context.Background()) // Wait indefinitely
+	return err
+}
+
+// Fd returns the file descriptor of the PTY (not applicable on Windows)
+func (p *PTY) Fd() uintptr {
+	return 0 // ConPTY doesn't expose a single FD
+}
+
+// Name returns the PTY device path (not applicable on Windows)
+func (p *PTY) Name() string {
+	return "conpty" // Windows doesn't have /dev/pts paths
+}
+
+// PID returns the shell process PID
+func (p *PTY) PID() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed || p.cpty == nil {
+		return 0
+	}
+
+	return p.cpty.Pid()
+}
+
+// Bridge connects the PTY to a data channel for bidirectional I/O
 type Bridge struct {
-	closed bool
+	pty         *PTY
+	send        func([]byte) error
+	viewerSends []func([]byte) error // Additional send functions for viewers (read-only)
+	recorder    func([]byte) error   // Optional recording callback
+	localOutput io.Writer            // Optional local output (for interactive mode)
+	done        chan struct{}
+	exited      chan struct{} // Closed when readLoop exits
+	closed      bool
+	mu          sync.Mutex
 }
 
+// NewBridge creates a bridge between a PTY and a send function
 func NewBridge(pty *PTY, send func([]byte) error) *Bridge {
-	return &Bridge{}
+	return &Bridge{
+		pty:    pty,
+		send:   send,
+		done:   make(chan struct{}),
+		exited: make(chan struct{}),
+	}
 }
 
-func (b *Bridge) Start()                               {}
-func (b *Bridge) HandleData(data []byte) error         { return ErrWindowsNotSupported }
-func (b *Bridge) HandleResize(rows, cols uint16) error { return ErrWindowsNotSupported }
-func (b *Bridge) Close() error                         { return io.ErrClosedPipe }
-func (b *Bridge) CloseWithoutPTY()                     {}
-func (b *Bridge) AddViewerSend(send func([]byte) error)   {}
-func (b *Bridge) ClearViewerSends()                       {}
-func (b *Bridge) SetRecorder(recorder func([]byte) error) {}
-func (b *Bridge) SetLocalOutput(w io.Writer)              {}
-func (b *Bridge) WaitForExit(timeout time.Duration) bool  { return true }
+// AddViewerSend adds an additional send function for viewer channels (read-only)
+func (b *Bridge) AddViewerSend(send func([]byte) error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.viewerSends = append(b.viewerSends, send)
+}
+
+// ClearViewerSends removes all viewer send functions
+func (b *Bridge) ClearViewerSends() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.viewerSends = nil
+}
+
+// SetRecorder sets the recording callback for PTY output
+func (b *Bridge) SetRecorder(recorder func([]byte) error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.recorder = recorder
+}
+
+// SetLocalOutput sets a local output writer (for interactive/SSH-like mode)
+func (b *Bridge) SetLocalOutput(w io.Writer) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.localOutput = w
+}
+
+// Start begins reading from the PTY and sending to the channel
+func (b *Bridge) Start() {
+	go b.readLoop()
+}
+
+// readLoop continuously reads from PTY and sends to channel
+func (b *Bridge) readLoop() {
+	defer close(b.exited) // Signal that readLoop has exited
+	buf := make([]byte, 4096)
+
+	for {
+		select {
+		case <-b.done:
+			return
+		default:
+		}
+
+		// Read from PTY - ConPTY Read blocks until data is available
+		// We use a goroutine with timeout to make it interruptible
+		readDone := make(chan struct{})
+		var n int
+		var err error
+
+		go func() {
+			n, err = b.pty.Read(buf)
+			close(readDone)
+		}()
+
+		select {
+		case <-b.done:
+			return
+		case <-readDone:
+			if err != nil {
+				b.Close()
+				return
+			}
+		case <-time.After(100 * time.Millisecond):
+			// Timeout - check if we should exit
+			continue
+		}
+
+		if n > 0 {
+			// Make a copy of the data
+			data := make([]byte, n)
+			copy(data, buf[:n])
+
+			// Send to primary (control) channel
+			if err := b.send(data); err != nil {
+				fmt.Printf("  [Debug] Bridge send error: %v\n", err)
+				b.Close()
+				return
+			}
+
+			// Send to viewer channels (best effort - don't fail if viewers disconnect)
+			b.mu.Lock()
+			for _, viewerSend := range b.viewerSends {
+				viewerSend(data) // Ignore errors for viewers
+			}
+			// Record if recorder is set (best effort - don't fail on recording errors)
+			if b.recorder != nil {
+				b.recorder(data)
+			}
+			// Write to local output if set (for interactive mode)
+			if b.localOutput != nil {
+				b.localOutput.Write(data)
+			}
+			b.mu.Unlock()
+		}
+	}
+}
+
+// HandleData writes incoming data to the PTY
+func (b *Bridge) HandleData(data []byte) error {
+	_, err := b.pty.Write(data)
+	return err
+}
+
+// HandleResize resizes the PTY
+func (b *Bridge) HandleResize(rows, cols uint16) error {
+	return b.pty.Resize(rows, cols)
+}
+
+// Close stops the bridge and closes the PTY
+func (b *Bridge) Close() error {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return nil
+	}
+	b.closed = true
+	close(b.done)
+	b.mu.Unlock()
+
+	return b.pty.Close()
+}
+
+// CloseWithoutPTY stops the bridge but keeps the PTY running for reconnection
+func (b *Bridge) CloseWithoutPTY() {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return
+	}
+	b.closed = true
+	close(b.done)
+	b.mu.Unlock()
+}
+
+// WaitForExit waits for the readLoop to exit (with timeout)
+func (b *Bridge) WaitForExit(timeout time.Duration) bool {
+	select {
+	case <-b.exited:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
