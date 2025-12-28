@@ -504,12 +504,24 @@ user=myuser:mypassword
 
 ## Platform Support
 
-| Platform | Status |
-|----------|--------|
-| Linux amd64/arm64/armv7 | Full support |
-| macOS amd64/arm64 | Full support |
-| FreeBSD amd64 | Full support |
-| Windows amd64/arm64 | Requires WSL |
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Linux amd64/arm64/armv7 | Full support | |
+| macOS amd64/arm64 | Full support | |
+| FreeBSD amd64 | Full support | |
+| Windows amd64/arm64 | Full support | Windows 10 1809+ (ConPTY) |
+
+### Windows Support
+
+Windows 10 version 1809 and later have native terminal hosting support using the ConPTY API. The default shell is PowerShell, with fallback to cmd.exe.
+
+```powershell
+# Start daemon and host a terminal session on Windows
+tt daemon start
+tt start -p mypassword
+```
+
+**Note:** Session persistence (reconnecting to shells after daemon restart) is not supported on Windows due to ConPTY limitations. For long-running sessions, consider using WSL.
 
 ## Forking & Self-Hosting
 
@@ -637,6 +649,7 @@ MIT
 ## Acknowledgments
 
 - [Pion WebRTC](https://github.com/pion/webrtc) - Pure Go WebRTC
-- [creack/pty](https://github.com/creack/pty) - PTY handling
+- [creack/pty](https://github.com/creack/pty) - PTY handling (Unix)
+- [conpty](https://github.com/UserExistsError/conpty) - ConPTY wrapper (Windows)
 - [xterm.js](https://xtermjs.org/) - Browser terminal
 - [Argon2](https://github.com/P-H-C/phc-winner-argon2) - Password hashing
