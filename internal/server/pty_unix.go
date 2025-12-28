@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -181,6 +182,7 @@ type Bridge struct {
 	recorder    func([]byte) error   // Optional recording callback
 	localOutput io.Writer            // Optional local output (for interactive mode)
 	done        chan struct{}
+	exited      chan struct{} // Closed when readLoop exits
 	closed      bool
 	mu          sync.Mutex
 }
@@ -188,9 +190,10 @@ type Bridge struct {
 // NewBridge creates a bridge between a PTY and a send function
 func NewBridge(pty *PTY, send func([]byte) error) *Bridge {
 	return &Bridge{
-		pty:  pty,
-		send: send,
-		done: make(chan struct{}),
+		pty:    pty,
+		send:   send,
+		done:   make(chan struct{}),
+		exited: make(chan struct{}),
 	}
 }
 
@@ -229,6 +232,7 @@ func (b *Bridge) Start() {
 
 // readLoop continuously reads from PTY and sends to channel
 func (b *Bridge) readLoop() {
+	defer close(b.exited) // Signal that readLoop has exited
 	buf := make([]byte, 4096)
 
 	for {
@@ -251,6 +255,7 @@ func (b *Bridge) readLoop() {
 
 			// Send to primary (control) channel
 			if err := b.send(data); err != nil {
+				fmt.Printf("  [Debug] Bridge send error: %v\n", err)
 				b.Close()
 				return
 			}
@@ -308,4 +313,14 @@ func (b *Bridge) CloseWithoutPTY() {
 	b.closed = true
 	close(b.done)
 	b.mu.Unlock()
+}
+
+// WaitForExit waits for the readLoop to exit (with timeout)
+func (b *Bridge) WaitForExit(timeout time.Duration) bool {
+	select {
+	case <-b.exited:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }

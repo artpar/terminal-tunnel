@@ -1,6 +1,7 @@
 package webrtc
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -153,7 +154,11 @@ func (ec *EncryptedChannel) sendMessage(msg *protocol.Message) error {
 		return err
 	}
 
-	return ec.dc.Send(encrypted)
+	if err := ec.dc.Send(encrypted); err != nil {
+		fmt.Printf("  [Debug] DC send error: %v, readyState: %v\n", err, ec.dc.ReadyState())
+		return err
+	}
+	return nil
 }
 
 // SendData sends terminal data
@@ -199,11 +204,14 @@ func (ec *EncryptedChannel) Close() error {
 		ec.mu.Unlock()
 		return nil
 	}
+	// Send close message BEFORE setting closed flag (so sendMessage doesn't early-return)
+	ec.mu.Unlock()
+	_ = ec.sendMessage(protocol.NewCloseMessage()) // Best effort
+
+	ec.mu.Lock()
 	ec.closed = true
 	ec.mu.Unlock()
 
-	// Try to send close message before closing (ignore error - best effort)
-	_ = ec.sendMessage(protocol.NewCloseMessage())
 	return ec.dc.Close()
 }
 

@@ -438,8 +438,14 @@ func (s *Server) Start(ctx ...context.Context) error {
 			}
 		})
 
+		// Brief delay to receive client's initial ping (for encryption key detection)
+		// Client sends ping immediately on connection to signal which key it uses
+		time.Sleep(100 * time.Millisecond)
+
 		// Start bridge (PTY -> channel)
+		fmt.Printf("  [Debug] Starting bridge\n")
 		bridge.Start()
+		fmt.Printf("  [Debug] Bridge started, starting keepalive\n")
 
 		// Start keepalive monitoring (server sends pings, expects pongs)
 		keepaliveTimeout := channel.StartKeepalive()
@@ -456,6 +462,11 @@ func (s *Server) Start(ctx ...context.Context) error {
 		case <-s.disconnected:
 			// Client disconnected, clean up and wait for reconnection
 			s.cleanupConnection()
+			// Drain any stale disconnected signals (cleanup itself can trigger OnClose)
+			select {
+			case <-s.disconnected:
+			default:
+			}
 			// Delay before accepting reconnection to avoid race condition
 			// where client reconnects with stale offer (must be longer than client's reconnect delay)
 			time.Sleep(3 * time.Second)
@@ -464,6 +475,11 @@ func (s *Server) Start(ctx ...context.Context) error {
 			// Keepalive timed out - no pong received within timeout
 			fmt.Printf("\n⚠ Connection timed out (no response from client)\n")
 			s.cleanupConnection()
+			// Drain any stale disconnected signals
+			select {
+			case <-s.disconnected:
+			default:
+			}
 			time.Sleep(3 * time.Second)
 			continue
 		case <-s.ctx.Done():
@@ -479,6 +495,10 @@ func (s *Server) cleanupConnection() {
 	if s.bridge != nil {
 		s.bridge.ClearViewerSends() // Clear viewer sends before closing
 		s.bridge.CloseWithoutPTY()  // Keep PTY running for reconnection
+		// Wait for bridge readLoop to exit (prevents two bridges reading from same PTY)
+		if !s.bridge.WaitForExit(2 * time.Second) {
+			fmt.Printf("  [Debug] Warning: bridge readLoop didn't exit in time\n")
+		}
 		s.bridge = nil
 	}
 	if s.channel != nil {
