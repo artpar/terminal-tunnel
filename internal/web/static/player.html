@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terminal Tunnel - Recording Playback</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            height: 100%;
+            background: #1a1a2e;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #e0e0e0;
+        }
+        #app {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            background: #0f0f1a;
+            border-bottom: 1px solid #2a2a4a;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 {
+            font-size: 18px;
+            color: #e94560;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header h1 span { font-size: 24px; }
+        .header a {
+            color: #888;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .header a:hover { color: #e94560; }
+
+        /* Drop zone */
+        .drop-zone {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            border: 3px dashed #2a2a4a;
+            margin: 20px;
+            border-radius: 12px;
+            transition: all 0.3s;
+        }
+        .drop-zone.dragover {
+            border-color: #e94560;
+            background: rgba(233, 69, 96, 0.1);
+        }
+        .drop-zone.hidden { display: none; }
+        .drop-zone-icon { font-size: 64px; margin-bottom: 20px; }
+        .drop-zone h2 { color: #fff; margin-bottom: 10px; }
+        .drop-zone p { color: #888; margin-bottom: 20px; }
+        .drop-zone input[type="file"] { display: none; }
+        .drop-zone button {
+            background: #e94560;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .drop-zone button:hover { background: #ff6b6b; }
+
+        /* Player container */
+        .player-container {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .player-container.active { display: flex; }
+
+        /* Recording info */
+        .recording-info {
+            background: #16213e;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-size: 13px;
+        }
+        .recording-info .filename {
+            color: #fff;
+            font-weight: 600;
+        }
+        .recording-info .meta {
+            color: #888;
+        }
+        .recording-info .close-btn {
+            margin-left: auto;
+            background: none;
+            border: 1px solid #444;
+            color: #888;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .recording-info .close-btn:hover {
+            border-color: #e94560;
+            color: #e94560;
+        }
+
+        /* Terminal */
+        .terminal-container {
+            flex: 1;
+            padding: 4px;
+            min-height: 0;
+        }
+        .terminal-container .xterm { height: 100%; }
+
+        /* Controls */
+        .controls {
+            background: #0f0f1a;
+            border-top: 1px solid #2a2a4a;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .controls button {
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .controls button:hover { background: #1a2a4e; }
+        .controls button.primary {
+            background: #e94560;
+            border-color: #e94560;
+        }
+        .controls button.primary:hover { background: #ff6b6b; }
+
+        /* Progress bar */
+        .progress-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .progress-bar {
+            flex: 1;
+            height: 6px;
+            background: #2a2a4a;
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+        }
+        .progress-bar:hover { height: 8px; }
+        .progress-fill {
+            height: 100%;
+            background: #e94560;
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.1s;
+        }
+        .time-display {
+            font-size: 12px;
+            color: #888;
+            min-width: 100px;
+            text-align: center;
+        }
+
+        /* Speed selector */
+        .speed-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .speed-selector label {
+            color: #888;
+            font-size: 12px;
+        }
+        .speed-selector select {
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* Keyboard shortcuts hint */
+        .shortcuts {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            background: rgba(0,0,0,0.9);
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: #888;
+            display: none;
+        }
+        .shortcuts.show { display: block; }
+        .shortcuts kbd {
+            background: #16213e;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #fff;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="header">
+            <h1><span>▶</span> Recording Playback</h1>
+            <a href="index.html">← Back to Terminal</a>
+        </div>
+
+        <div class="drop-zone" id="drop-zone">
+            <div class="drop-zone-icon">📼</div>
+            <h2>Drop Recording File Here</h2>
+            <p>Supports .cast files (asciicast v2 format)</p>
+            <input type="file" id="file-input" accept=".cast,.json">
+            <button id="browse-btn">Browse Files</button>
+        </div>
+
+        <div class="player-container" id="player-container">
+            <div class="recording-info">
+                <span class="filename" id="filename">recording.cast</span>
+                <span class="meta" id="meta">80x24 • 0:00</span>
+                <button class="close-btn" id="close-btn">Close</button>
+            </div>
+            <div class="terminal-container" id="terminal-container"></div>
+            <div class="controls">
+                <button class="primary" id="play-btn">▶ Play</button>
+                <button id="restart-btn">↻ Restart</button>
+                <div class="progress-container">
+                    <div class="progress-bar" id="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <span class="time-display" id="time-display">0:00 / 0:00</span>
+                </div>
+                <div class="speed-selector">
+                    <label>Speed:</label>
+                    <select id="speed-select">
+                        <option value="0.5">0.5x</option>
+                        <option value="1" selected>1x</option>
+                        <option value="2">2x</option>
+                        <option value="4">4x</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="shortcuts" id="shortcuts">
+        <div><kbd>Space</kbd> Play/Pause</div>
+        <div><kbd>←/→</kbd> Seek ±5s</div>
+        <div><kbd>+/-</kbd> Speed</div>
+        <div><kbd>R</kbd> Restart</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // DOM elements
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const browseBtn = document.getElementById('browse-btn');
+        const playerContainer = document.getElementById('player-container');
+        const terminalContainer = document.getElementById('terminal-container');
+        const filenameEl = document.getElementById('filename');
+        const metaEl = document.getElementById('meta');
+        const closeBtn = document.getElementById('close-btn');
+        const playBtn = document.getElementById('play-btn');
+        const restartBtn = document.getElementById('restart-btn');
+        const progressBar = document.getElementById('progress-bar');
+        const progressFill = document.getElementById('progress-fill');
+        const timeDisplay = document.getElementById('time-display');
+        const speedSelect = document.getElementById('speed-select');
+        const shortcuts = document.getElementById('shortcuts');
+
+        // Player state
+        let term = null;
+        let fitAddon = null;
+        let recording = null;
+        let events = [];
+        let playing = false;
+        let currentTime = 0;
+        let currentEventIndex = 0;
+        let playbackTimer = null;
+        let speed = 1;
+
+        // Parse asciicast v2 format
+        function parseAsciicast(text) {
+            const lines = text.trim().split('\n');
+            if (lines.length < 2) throw new Error('Invalid recording format');
+
+            // Parse header (first line)
+            let header;
+            try {
+                header = JSON.parse(lines[0]);
+            } catch (e) {
+                throw new Error('Invalid asciicast header');
+            }
+
+            if (header.version !== 2) {
+                throw new Error('Only asciicast v2 format is supported');
+            }
+
+            // Parse events (remaining lines)
+            const events = [];
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i].trim()) continue;
+                try {
+                    const event = JSON.parse(lines[i]);
+                    if (Array.isArray(event) && event.length >= 3) {
+                        events.push({
+                            time: event[0],
+                            type: event[1],
+                            data: event[2]
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Skipping invalid event line:', i);
+                }
+            }
+
+            // Filter to output events only
+            const outputEvents = events.filter(e => e.type === 'o');
+
+            return {
+                width: header.width || 80,
+                height: header.height || 24,
+                duration: outputEvents.length > 0 ? outputEvents[outputEvents.length - 1].time : 0,
+                title: header.title || 'Recording',
+                timestamp: header.timestamp,
+                events: outputEvents
+            };
+        }
+
+        // Format time as M:SS
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Initialize terminal
+        function initTerminal(width, height) {
+            if (term) {
+                term.dispose();
+            }
+
+            term = new Terminal({
+                cols: width,
+                rows: height,
+                cursorBlink: false,
+                disableStdin: true,
+                theme: {
+                    background: '#1a1a2e',
+                    foreground: '#e0e0e0',
+                    cursor: '#e94560'
+                },
+                fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                fontSize: 14
+            });
+
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(terminalContainer);
+
+            // Fit after a brief delay
+            setTimeout(() => fitAddon.fit(), 50);
+        }
+
+        // Load recording
+        function loadRecording(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    recording = parseAsciicast(e.target.result);
+                    events = recording.events;
+
+                    // Update UI
+                    filenameEl.textContent = file.name;
+                    metaEl.textContent = `${recording.width}x${recording.height} • ${formatTime(recording.duration)}`;
+                    timeDisplay.textContent = `0:00 / ${formatTime(recording.duration)}`;
+
+                    // Initialize terminal
+                    initTerminal(recording.width, recording.height);
+
+                    // Show player
+                    dropZone.classList.add('hidden');
+                    playerContainer.classList.add('active');
+
+                    // Reset state
+                    currentTime = 0;
+                    currentEventIndex = 0;
+                    playing = false;
+                    updatePlayButton();
+                    updateProgress();
+
+                } catch (err) {
+                    alert('Error loading recording: ' + err.message);
+                    console.error(err);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Playback controls
+        function play() {
+            if (!recording) return;
+            if (currentEventIndex >= events.length) {
+                // Restart if at end
+                restart();
+            }
+            playing = true;
+            updatePlayButton();
+            scheduleNextEvent();
+        }
+
+        function pause() {
+            playing = false;
+            if (playbackTimer) {
+                clearTimeout(playbackTimer);
+                playbackTimer = null;
+            }
+            updatePlayButton();
+        }
+
+        function togglePlay() {
+            if (playing) {
+                pause();
+            } else {
+                play();
+            }
+        }
+
+        function restart() {
+            pause();
+            currentTime = 0;
+            currentEventIndex = 0;
+            term.reset();
+            updateProgress();
+        }
+
+        function scheduleNextEvent() {
+            if (!playing || currentEventIndex >= events.length) {
+                if (currentEventIndex >= events.length) {
+                    playing = false;
+                    updatePlayButton();
+                }
+                return;
+            }
+
+            const event = events[currentEventIndex];
+            const delay = (event.time - currentTime) / speed * 1000;
+
+            playbackTimer = setTimeout(() => {
+                // Write output to terminal
+                term.write(event.data);
+                currentTime = event.time;
+                currentEventIndex++;
+                updateProgress();
+                scheduleNextEvent();
+            }, Math.max(0, delay));
+        }
+
+        function seek(targetTime) {
+            pause();
+            targetTime = Math.max(0, Math.min(targetTime, recording.duration));
+
+            // Reset terminal
+            term.reset();
+            currentTime = 0;
+            currentEventIndex = 0;
+
+            // Replay events up to target time
+            for (let i = 0; i < events.length; i++) {
+                if (events[i].time > targetTime) break;
+                term.write(events[i].data);
+                currentEventIndex = i + 1;
+                currentTime = events[i].time;
+            }
+
+            updateProgress();
+        }
+
+        function updatePlayButton() {
+            playBtn.innerHTML = playing ? '⏸ Pause' : '▶ Play';
+        }
+
+        function updateProgress() {
+            if (!recording) return;
+            const percent = (currentTime / recording.duration) * 100;
+            progressFill.style.width = percent + '%';
+            timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(recording.duration)}`;
+        }
+
+        // Event listeners
+        browseBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                loadRecording(e.target.files[0]);
+            }
+        });
+
+        // Drag and drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                loadRecording(e.dataTransfer.files[0]);
+            }
+        });
+
+        closeBtn.addEventListener('click', () => {
+            pause();
+            if (term) {
+                term.dispose();
+                term = null;
+            }
+            recording = null;
+            events = [];
+            playerContainer.classList.remove('active');
+            dropZone.classList.remove('hidden');
+        });
+
+        playBtn.addEventListener('click', togglePlay);
+        restartBtn.addEventListener('click', restart);
+
+        progressBar.addEventListener('click', (e) => {
+            if (!recording) return;
+            const rect = progressBar.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            seek(percent * recording.duration);
+        });
+
+        speedSelect.addEventListener('change', (e) => {
+            speed = parseFloat(e.target.value);
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+            switch (e.key) {
+                case ' ':
+                    e.preventDefault();
+                    togglePlay();
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    seek(currentTime - 5);
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    seek(currentTime + 5);
+                    break;
+                case '+':
+                case '=':
+                    e.preventDefault();
+                    if (speed < 4) {
+                        speed = speed * 2;
+                        speedSelect.value = speed.toString();
+                    }
+                    break;
+                case '-':
+                    e.preventDefault();
+                    if (speed > 0.5) {
+                        speed = speed / 2;
+                        speedSelect.value = speed.toString();
+                    }
+                    break;
+                case 'r':
+                case 'R':
+                    e.preventDefault();
+                    restart();
+                    break;
+                case '?':
+                    shortcuts.classList.toggle('show');
+                    setTimeout(() => shortcuts.classList.remove('show'), 3000);
+                    break;
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (fitAddon) {
+                fitAddon.fit();
+            }
+        });
+
+        // Check for file in URL (for sharing)
+        const params = new URLSearchParams(window.location.search);
+        const fileUrl = params.get('url');
+        if (fileUrl) {
+            fetch(fileUrl)
+                .then(r => r.blob())
+                .then(blob => {
+                    const file = new File([blob], 'recording.cast');
+                    loadRecording(file);
+                })
+                .catch(err => {
+                    console.error('Failed to load recording from URL:', err);
+                });
+        }
+    })();
+    </script>
+</body>
+</html>

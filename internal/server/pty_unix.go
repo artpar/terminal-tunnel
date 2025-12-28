@@ -242,9 +242,17 @@ func (b *Bridge) IsPaused() bool {
 }
 
 // AddViewerSend adds an additional send function for viewer channels (read-only)
+// This also sends any buffered output to the new viewer for late-join replay
 func (b *Bridge) AddViewerSend(send func([]byte) error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// Send buffered output to new viewer for late-join replay
+	if len(b.buffer) > 0 {
+		fmt.Printf("  [Debug] Sending %d bytes of buffered output to new viewer\n", len(b.buffer))
+		go send(b.buffer) // Non-blocking send
+	}
+
 	b.viewerSends = append(b.viewerSends, send)
 }
 
@@ -325,8 +333,10 @@ func (b *Bridge) readLoop() {
 			}
 
 			// Send to viewer channels (best effort - don't fail if viewers disconnect)
+			// Use goroutines to prevent slow viewers from blocking main stream
 			for _, viewerSend := range b.viewerSends {
-				viewerSend(data) // Ignore errors for viewers
+				vs := viewerSend // Capture for goroutine
+				go vs(data)      // Non-blocking send
 			}
 			// Record if recorder is set (best effort - don't fail on recording errors)
 			if b.recorder != nil {

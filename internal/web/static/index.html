@@ -114,6 +114,19 @@
         }
         .new-tab-btn:hover { background: #16213e; color: #888; border-color: #666; }
 
+        .player-link {
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px solid #444;
+            border-radius: 6px;
+            color: #666;
+            font-size: 13px;
+            cursor: pointer;
+            text-decoration: none;
+            flex-shrink: 0;
+        }
+        .player-link:hover { background: #16213e; color: #888; border-color: #666; }
+
         /* Mobile dropdown */
         .mobile-session-select {
             display: none;
@@ -285,6 +298,26 @@
             font-size: 11px;
         }
 
+        /* Viewer mode styling */
+        .terminal-screen.viewer-mode .terminal-container {
+            border: 2px solid #f9ca24;
+            border-radius: 4px;
+        }
+        .terminal-screen.viewer-mode::before {
+            content: '👁 VIEWING - Read Only';
+            display: block;
+            background: linear-gradient(90deg, #f9ca24, #f0932b);
+            color: #000;
+            text-align: center;
+            padding: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .tab.viewer .tab-name::after {
+            content: ' 👁';
+            opacity: 0.7;
+        }
+
         .status-bar-right {
             display: flex;
             gap: 8px;
@@ -356,6 +389,7 @@
             <div id="tabs-container"></div>
             <select class="mobile-session-select" id="mobile-select"></select>
             <button class="new-tab-btn" id="new-tab-btn" title="New Session (Ctrl+T)">+</button>
+            <a class="player-link" href="player.html" title="Recording Playback">▶ Play</a>
         </div>
 
         <!-- Main Content Area -->
@@ -603,7 +637,7 @@
             tabsContainer.innerHTML = '';
             manager.sessions.forEach((session, id) => {
                 const tab = document.createElement('div');
-                tab.className = 'tab' + (id === manager.activeId ? ' active' : '');
+                tab.className = 'tab' + (id === manager.activeId ? ' active' : '') + (session.readOnly ? ' viewer' : '');
                 tab.dataset.id = id;
 
                 const statusClass = session.status === 'connected' ? 'connected' :
@@ -699,8 +733,8 @@
 
             const statusText = {
                 'new': 'Ready to connect',
-                'connecting': 'Connecting...',
-                'connected': '● Connected',
+                'connecting': session.readOnly ? 'Connecting as viewer...' : 'Connecting...',
+                'connected': session.readOnly ? '👁 Viewing' : '● Connected',
                 'disconnected': '○ Disconnected'
             };
 
@@ -1207,6 +1241,11 @@
         function showTerminal(session) {
             session.connectScreen.classList.remove('active');
             session.terminalScreen.classList.add('active');
+
+            // Add viewer mode class if read-only
+            if (session.readOnly) {
+                session.terminalScreen.classList.add('viewer-mode');
+            }
 
             const termContainer = session.terminalScreen.querySelector('.terminal-container');
             const mobileInput = session.terminalScreen.querySelector('.mobile-input');
