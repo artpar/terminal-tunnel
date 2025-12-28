@@ -11,8 +11,10 @@ DEMO_DIR="$PROJECT_DIR/docs/demo-frames"
 OUTPUT_GIF="$PROJECT_DIR/docs/demo.gif"
 PASSWORD="demopassword123"
 
-# Secondary monitor position (adjust if needed)
-WINDOW_X=3500
+# Secondary monitor position (auto-detect or use defaults)
+# For Retina Macs, the logical coordinate of external monitor depends on arrangement
+# Typically: Main display (Retina) uses logical coords, external starts after it
+WINDOW_X=1800  # Adjusted for typical Retina + external setup
 WINDOW_Y=100
 WINDOW_WIDTH=900
 WINDOW_HEIGHT=700
@@ -187,8 +189,20 @@ const windowW = 900;
 const windowH = 700;
 
 async function screenshot(name) {
-    // Use macOS screencapture to get browser chrome
-    const cmd = `screencapture -R ${windowX},${windowY},${windowW},${windowH} "${demoDir}/${name}"`;
+    // Bring Chromium to front and capture with padding to ensure full window
+    try {
+        await execAsync(`osascript -e 'tell application "System Events" to tell process "Chromium" to set frontmost to true'`);
+        await sleep(200);
+    } catch (e) {}
+
+    // Small padding to ensure we capture the full window including shadows
+    const pad = 10;
+    const captureX = Math.max(0, windowX - pad);
+    const captureY = Math.max(0, windowY - pad);
+    const captureW = windowW + pad * 2;
+    const captureH = windowH + pad * 2;
+
+    const cmd = `screencapture -x -R ${captureX},${captureY},${captureW},${captureH} "${demoDir}/${name}"`;
     await execAsync(cmd);
     console.log(`  Captured: ${name}`);
 }
