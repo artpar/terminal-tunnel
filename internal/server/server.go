@@ -423,7 +423,10 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 		channel.OnClose(func() {
 			fmt.Printf("\n✓ Client disconnected (data channel closed)\n")
-			fmt.Printf("  [Debug] Peer connection state: %s\n", s.peer.ConnectionState().String())
+			if s.peer != nil {
+				fmt.Printf("  [Debug] Peer connection state: %s\n", s.peer.ConnectionState().String())
+			}
+			fmt.Printf("  [Debug] Channel useAltKey: %v\n", channel.UseAltKey())
 			// Invoke disconnect callback
 			if s.callbacks.OnClientDisconnect != nil {
 				s.callbacks.OnClientDisconnect()
@@ -431,6 +434,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 			select {
 			case s.disconnected <- true:
 			default:
+				fmt.Printf("  [Debug] disconnected channel was full/blocked\n")
 			}
 		})
 
@@ -452,15 +456,15 @@ func (s *Server) Start(ctx ...context.Context) error {
 		case <-s.disconnected:
 			// Client disconnected, clean up and wait for reconnection
 			s.cleanupConnection()
-			// Brief delay before accepting reconnection to avoid race condition
-			// where client reconnects with stale offer
-			time.Sleep(500 * time.Millisecond)
+			// Delay before accepting reconnection to avoid race condition
+			// where client reconnects with stale offer (must be longer than client's reconnect delay)
+			time.Sleep(3 * time.Second)
 			continue
 		case <-keepaliveTimeout:
 			// Keepalive timed out - no pong received within timeout
 			fmt.Printf("\n⚠ Connection timed out (no response from client)\n")
 			s.cleanupConnection()
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(3 * time.Second)
 			continue
 		case <-s.ctx.Done():
 			return s.Stop()
@@ -471,6 +475,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 // cleanupConnection cleans up the current connection for reconnection
 // PTY is kept running to allow client reconnection to the same session
 func (s *Server) cleanupConnection() {
+	fmt.Printf("  [Debug] cleanupConnection starting\n")
 	if s.bridge != nil {
 		s.bridge.ClearViewerSends() // Clear viewer sends before closing
 		s.bridge.CloseWithoutPTY()  // Keep PTY running for reconnection
@@ -493,6 +498,7 @@ func (s *Server) cleanupConnection() {
 		s.viewerPeer.Close()
 		s.viewerPeer = nil
 	}
+	fmt.Printf("  [Debug] cleanupConnection complete\n")
 }
 
 // Stop gracefully shuts down the server

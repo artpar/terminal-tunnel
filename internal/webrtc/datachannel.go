@@ -217,6 +217,13 @@ func (ec *EncryptedChannel) Label() string {
 	return ec.dc.Label()
 }
 
+// UseAltKey returns whether the channel is using the alternate (PBKDF2) key
+func (ec *EncryptedChannel) UseAltKey() bool {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	return ec.useAltKey
+}
+
 // StartKeepalive begins sending pings and monitoring for pong timeouts
 // Returns a channel that will receive true if the connection times out
 func (ec *EncryptedChannel) StartKeepalive() <-chan struct{} {
