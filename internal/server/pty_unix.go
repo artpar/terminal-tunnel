@@ -184,11 +184,14 @@ type Bridge struct {
 	done          chan struct{}
 	exited        chan struct{} // Closed when readLoop exits
 	closed        bool
+	started       bool   // Prevents double-starting readLoop
 	paused        bool   // When true, output is buffered instead of sent
 	buffer        []byte // Ring buffer for output during pause
 	historyBuffer []byte // Always-on buffer for late-join viewer replay
 	bufferMax     int    // Maximum buffer size (default 64KB)
 	mu            sync.Mutex
+	closeOnce     sync.Once // Ensures channels are closed only once
+	exitOnce      sync.Once // Ensures exited channel is closed only once
 }
 
 const defaultBufferMax = 64 * 1024 // 64KB default buffer
@@ -283,12 +286,19 @@ func (b *Bridge) SetLocalOutput(w io.Writer) {
 
 // Start begins reading from the PTY and sending to the channel
 func (b *Bridge) Start() {
+	b.mu.Lock()
+	if b.started {
+		b.mu.Unlock()
+		return // Already started, prevent double-start
+	}
+	b.started = true
+	b.mu.Unlock()
 	go b.readLoop()
 }
 
 // readLoop continuously reads from PTY and sends to channel
 func (b *Bridge) readLoop() {
-	defer close(b.exited) // Signal that readLoop has exited
+	defer b.exitOnce.Do(func() { close(b.exited) }) // Signal that readLoop has exited (safe close)
 	buf := make([]byte, 4096)
 
 	for {
@@ -381,8 +391,9 @@ func (b *Bridge) Close() error {
 		return nil
 	}
 	b.closed = true
-	close(b.done)
 	b.mu.Unlock()
+
+	b.closeOnce.Do(func() { close(b.done) }) // Safe close
 
 	return b.pty.Close()
 }
@@ -395,8 +406,9 @@ func (b *Bridge) CloseWithoutPTY() {
 		return
 	}
 	b.closed = true
-	close(b.done)
 	b.mu.Unlock()
+
+	b.closeOnce.Do(func() { close(b.done) }) // Safe close
 }
 
 // WaitForExit waits for the readLoop to exit (with timeout)
