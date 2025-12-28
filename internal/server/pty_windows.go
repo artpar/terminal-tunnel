@@ -170,17 +170,61 @@ type Bridge struct {
 	done        chan struct{}
 	exited      chan struct{} // Closed when readLoop exits
 	closed      bool
+	paused      bool     // When true, output is buffered instead of sent
+	buffer      []byte   // Ring buffer for output during pause
+	bufferMax   int      // Maximum buffer size (default 64KB)
 	mu          sync.Mutex
 }
+
+const defaultBufferMax = 64 * 1024 // 64KB default buffer
 
 // NewBridge creates a bridge between a PTY and a send function
 func NewBridge(pty *PTY, send func([]byte) error) *Bridge {
 	return &Bridge{
-		pty:    pty,
-		send:   send,
-		done:   make(chan struct{}),
-		exited: make(chan struct{}),
+		pty:       pty,
+		send:      send,
+		done:      make(chan struct{}),
+		exited:    make(chan struct{}),
+		bufferMax: defaultBufferMax,
 	}
+}
+
+// Pause switches the bridge to buffering mode
+// Output is stored in a ring buffer instead of being sent
+func (b *Bridge) Pause() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.paused = true
+	b.viewerSends = nil // Clear viewer sends when pausing
+	fmt.Printf("  [Debug] Bridge paused, buffering output (max %d bytes)\n", b.bufferMax)
+}
+
+// Resume switches back to sending mode and flushes buffered output
+// Returns the number of bytes that were buffered and sent
+func (b *Bridge) Resume(send func([]byte) error) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bufferedBytes := len(b.buffer)
+	if bufferedBytes > 0 {
+		fmt.Printf("  [Debug] Bridge resuming, flushing %d buffered bytes\n", bufferedBytes)
+		// Send buffered data to new client
+		if err := send(b.buffer); err != nil {
+			fmt.Printf("  [Debug] Error flushing buffer: %v\n", err)
+		}
+		b.buffer = nil // Clear buffer
+	}
+
+	b.send = send
+	b.paused = false
+	return bufferedBytes
+}
+
+// IsPaused returns whether the bridge is in paused (buffering) mode
+func (b *Bridge) IsPaused() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.paused
 }
 
 // AddViewerSend adds an additional send function for viewer channels (read-only)
@@ -257,15 +301,27 @@ func (b *Bridge) readLoop() {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 
+			b.mu.Lock()
+			if b.paused {
+				// Buffer the data instead of sending
+				b.buffer = append(b.buffer, data...)
+				// Trim to max buffer size (keep most recent data)
+				if len(b.buffer) > b.bufferMax {
+					b.buffer = b.buffer[len(b.buffer)-b.bufferMax:]
+				}
+				b.mu.Unlock()
+				continue
+			}
+
 			// Send to primary (control) channel
 			if err := b.send(data); err != nil {
 				fmt.Printf("  [Debug] Bridge send error: %v\n", err)
+				b.mu.Unlock()
 				b.Close()
 				return
 			}
 
 			// Send to viewer channels (best effort - don't fail if viewers disconnect)
-			b.mu.Lock()
 			for _, viewerSend := range b.viewerSends {
 				viewerSend(data) // Ignore errors for viewers
 			}

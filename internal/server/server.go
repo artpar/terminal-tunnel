@@ -398,9 +398,21 @@ func (s *Server) Start(ctx ...context.Context) error {
 		channel.SetAltKey(&s.pbkdf2Key)
 		s.channel = channel
 
-		// Create bridge
-		bridge := NewBridge(s.pty, channel.SendData)
-		s.bridge = bridge
+		// Create or resume bridge
+		var bridge *Bridge
+		if s.bridge != nil && s.bridge.IsPaused() {
+			// Resume existing bridge - this will flush buffered output
+			bridge = s.bridge
+			bufferedBytes := bridge.Resume(channel.SendData)
+			if bufferedBytes > 0 {
+				fmt.Printf("  [Debug] Replayed %d bytes of buffered output\n", bufferedBytes)
+			}
+		} else {
+			// Create new bridge
+			bridge = NewBridge(s.pty, channel.SendData)
+			s.bridge = bridge
+			bridge.Start()
+		}
 
 		// Attach recorder to bridge if recording is enabled
 		if s.recorder != nil {
@@ -489,17 +501,13 @@ func (s *Server) Start(ctx ...context.Context) error {
 }
 
 // cleanupConnection cleans up the current connection for reconnection
-// PTY is kept running to allow client reconnection to the same session
+// PTY and Bridge are kept running to buffer output for client reconnection
 func (s *Server) cleanupConnection() {
 	fmt.Printf("  [Debug] cleanupConnection starting\n")
 	if s.bridge != nil {
-		s.bridge.ClearViewerSends() // Clear viewer sends before closing
-		s.bridge.CloseWithoutPTY()  // Keep PTY running for reconnection
-		// Wait for bridge readLoop to exit (prevents two bridges reading from same PTY)
-		if !s.bridge.WaitForExit(2 * time.Second) {
-			fmt.Printf("  [Debug] Warning: bridge readLoop didn't exit in time\n")
-		}
-		s.bridge = nil
+		s.bridge.ClearViewerSends() // Clear viewer sends
+		s.bridge.Pause()            // Switch to buffering mode (keeps reading from PTY)
+		// Don't set bridge to nil - we'll resume it on reconnect
 	}
 	if s.channel != nil {
 		s.channel.StopKeepalive() // Stop keepalive before closing
