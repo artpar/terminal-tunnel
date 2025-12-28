@@ -1041,8 +1041,8 @@
             }
         }
 
-        const PONG_TIMEOUT = 15000; // 15 seconds without pong = connection dead
-        const RECONNECT_BASE_DELAY = 2000; // Start with 2 seconds (give server time to prepare new offer)
+        const PONG_TIMEOUT = 35000; // 35 seconds without pong = connection dead (longer than server's 30s)
+        const RECONNECT_BASE_DELAY = 1000; // Start with 1 second for faster initial reconnect
         const RECONNECT_MAX_DELAY = 30000; // Max 30 seconds
 
         function startPingInterval(session) {
@@ -1064,7 +1064,7 @@
                     console.log('Data channel not open but status is connected, dc state:',
                         session.dc ? session.dc.readyState : 'no dc');
                 }
-            }, 5000);
+            }, 10000); // Match server's 10s ping interval
         }
 
         function attemptAutoReconnect(session) {
