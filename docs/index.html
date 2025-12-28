@@ -1009,6 +1009,8 @@
                 showTerminal(session);
                 startPingInterval(session);
                 manager.updateUI();
+                // Refresh mobile viewport after connection (keyboard may have changed)
+                if (window.refreshMobileViewport) window.refreshMobileViewport();
                 console.log('[DC] Data channel setup complete');
             };
 
@@ -1440,6 +1442,7 @@
             let resizeTimeout = null;
             let lastHeight = window.innerHeight;
             let keyboardVisible = false;
+            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
             function setAppHeight(height) {
                 const h = Math.floor(height) + 'px';
@@ -1466,13 +1469,23 @@
                 if (resizeTimeout) clearTimeout(resizeTimeout);
                 resizeTimeout = setTimeout(() => {
                     const session = manager.getActiveSession();
-                    if (session && session.fitAddon && session.status === 'connected') {
+                    if (session && session.fitAddon) {
                         session.fitAddon.fit();
                     }
-                }, 100);
+                }, 50);
             }
 
-            // Continuous polling for viewport changes (iOS workaround)
+            // Check if element is a text input (including xterm's hidden textarea)
+            function isTextInput(el) {
+                if (!el) return false;
+                if (el.tagName === 'INPUT' && el.type !== 'button' && el.type !== 'submit') return true;
+                if (el.tagName === 'TEXTAREA') return true;
+                // xterm.js uses a helper textarea with this class
+                if (el.classList && el.classList.contains('xterm-helper-textarea')) return true;
+                return false;
+            }
+
+            // Continuous polling for viewport changes (always on mobile)
             let pollInterval = null;
             function startPolling() {
                 if (pollInterval) return;
@@ -1497,24 +1510,26 @@
             }
             window.addEventListener('resize', updateHeight);
 
-            // Detect keyboard via focus (iOS workaround)
+            // Detect keyboard via focus
             document.addEventListener('focusin', (e) => {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                if (isTextInput(e.target)) {
                     keyboardVisible = true;
                     startPolling();
-                    // Delay to let keyboard animate
+                    // Multiple updates to catch keyboard animation
+                    setTimeout(updateHeight, 100);
                     setTimeout(updateHeight, 300);
                     setTimeout(updateHeight, 500);
                 }
             });
 
             document.addEventListener('focusout', (e) => {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                if (isTextInput(e.target)) {
                     keyboardVisible = false;
                     setTimeout(() => {
                         if (!keyboardVisible) {
-                            stopPolling();
                             updateHeight();
+                            // Keep polling on mobile - keyboard can reappear
+                            if (!isMobile) stopPolling();
                         }
                     }, 300);
                 }
@@ -1524,7 +1539,20 @@
             window.addEventListener('orientationchange', () => {
                 setTimeout(updateHeight, 100);
                 setTimeout(updateHeight, 300);
+                setTimeout(updateHeight, 500);
             });
+
+            // Expose global function for manual refresh (called after reconnection)
+            window.refreshMobileViewport = () => {
+                updateHeight();
+                setTimeout(updateHeight, 100);
+                setTimeout(updateHeight, 300);
+            };
+
+            // Always poll on mobile (low overhead, catches all keyboard changes)
+            if (isMobile) {
+                startPolling();
+            }
 
             // Initial call
             updateHeight();
