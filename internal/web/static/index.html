@@ -485,6 +485,7 @@
                 this.maxReconnectAttempts = 5;
                 this.password = null; // Stored for auto-reconnect only
                 this.readOnly = false; // True for viewer sessions (code ends with V)
+                this.disconnectTimer = null; // Timer for delayed disconnect on 'disconnected' state
             }
 
             // Check if this is a viewer session (code ends with V)
@@ -494,6 +495,7 @@
 
             destroy() {
                 if (this.pingInterval) clearInterval(this.pingInterval);
+                if (this.disconnectTimer) clearTimeout(this.disconnectTimer);
                 if (this.dc) this.dc.close();
                 if (this.pc) this.pc.close();
                 if (this.term) this.term.dispose();
@@ -992,8 +994,30 @@
             session.pc.onconnectionstatechange = () => {
                 const state = session.pc.connectionState;
                 console.log('[PC] Connection state:', state, 'dc state:', session.dc?.readyState);
-                if (state === 'disconnected' || state === 'failed') {
-                    handleDisconnect(session, true); // Auto-reconnect on ICE failure
+                if (state === 'failed') {
+                    // Connection truly failed - disconnect and reconnect
+                    handleDisconnect(session, true);
+                } else if (state === 'disconnected') {
+                    // 'disconnected' is transient and can recover - wait before giving up
+                    // Clear any existing disconnect timer
+                    if (session.disconnectTimer) {
+                        clearTimeout(session.disconnectTimer);
+                    }
+                    console.log('[PC] Connection disconnected, waiting 5s for recovery...');
+                    session.disconnectTimer = setTimeout(() => {
+                        // If still disconnected after 5 seconds, trigger reconnect
+                        if (session.pc && session.pc.connectionState === 'disconnected') {
+                            console.log('[PC] Connection did not recover, triggering reconnect');
+                            handleDisconnect(session, true);
+                        }
+                    }, 5000);
+                } else if (state === 'connected') {
+                    // Connection recovered - cancel any pending disconnect
+                    if (session.disconnectTimer) {
+                        clearTimeout(session.disconnectTimer);
+                        session.disconnectTimer = null;
+                        console.log('[PC] Connection recovered!');
+                    }
                 }
             };
 
@@ -1096,6 +1120,10 @@
             if (session.pingInterval) {
                 clearInterval(session.pingInterval);
                 session.pingInterval = null;
+            }
+            if (session.disconnectTimer) {
+                clearTimeout(session.disconnectTimer);
+                session.disconnectTimer = null;
             }
             manager.updateUI();
             if (autoReconnect) {
