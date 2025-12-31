@@ -1,0 +1,13 @@
+{
+  "name": "webrtc-stress-test",
+  "version": "1.0.0",
+  "description": "Stress tests for terminal-tunnel WebRTC connections",
+  "main": "webrtc-stress-test.js",
+  "scripts": {
+    "test": "node webrtc-stress-test.js"
+  },
+  "dependencies": {
+    "playwright": "^1.57.0",
+    "puppeteer": "^21.0.0"
+  }
+}

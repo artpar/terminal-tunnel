@@ -89,6 +89,17 @@ type Server struct {
 
 	// Relay heartbeat
 	heartbeatStop chan struct{}
+
+	// Standby peer for instant reconnection (pre-created while connected)
+	// The relay always has the NEXT peer's offer, not the current one
+	// This eliminates the race condition where client gets stale offer
+	standbyPeer  *ttwebrtc.Peer
+	standbyDc    *webrtc.DataChannel
+	standbyOffer string
+
+	// Answer watcher for detecting client reconnection
+	newAnswer     chan string
+	answerWatcher chan struct{}
 }
 
 // NewServer creates a new terminal tunnel server
@@ -205,104 +216,136 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 	// Connection loop - allows reconnection
 	for {
-		// Create WebRTC peer with configured ICE servers (STUN + optional TURN)
-		peer, err := ttwebrtc.NewPeer(s.webrtcConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create peer: %w", err)
-		}
-		s.peer = peer
-
-		// Monitor connection state for debugging and early disconnect detection
-		peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-			fmt.Printf("  [WebRTC] Connection state: %s\n", state.String())
-			switch state {
-			case webrtc.PeerConnectionStateConnected:
-				// Connection established
-			case webrtc.PeerConnectionStateDisconnected:
-				// Note: "disconnected" can recover - don't trigger reconnect yet
-				fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
-			case webrtc.PeerConnectionStateFailed:
-				fmt.Printf("\n✗ WebRTC connection failed\n")
-				select {
-				case s.disconnected <- true:
-				default:
-				}
-			case webrtc.PeerConnectionStateClosed:
-				// Connection closed intentionally
-			}
-		})
-
-		// Monitor ICE connection state for debugging
-		peer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-			fmt.Printf("  [ICE] Connection state: %s\n", state.String())
-			switch state {
-			case webrtc.ICEConnectionStateDisconnected:
-				fmt.Printf("\n⚠ ICE disconnected (checking connectivity...)\n")
-			case webrtc.ICEConnectionStateFailed:
-				fmt.Printf("\n✗ ICE failed - NAT/firewall may be blocking UDP\n")
-			case webrtc.ICEConnectionStateClosed:
-				fmt.Printf("\n⚠ ICE connection closed\n")
-			}
-		})
-
-		// Create data channel
-		dc, err := peer.CreateDataChannel("terminal")
-		if err != nil {
-			return fmt.Errorf("failed to create data channel: %w", err)
-		}
-
-		// Create SDP offer
-		offer, err := peer.CreateOffer()
-		if err != nil {
-			return fmt.Errorf("failed to create offer: %w", err)
-		}
-
-		// Get public IP from STUN (for display purposes) - only on first connection
-		if isFirstConnection {
-			publicIP := peer.GetPublicIP()
-			if publicIP != "" {
-				fmt.Printf("✓ Public IP discovered via STUN: %s\n", publicIP)
-			}
-		}
-
+		var peer *ttwebrtc.Peer
+		var dc *webrtc.DataChannel
 		var answer string
+		var err error
 
-		if isFirstConnection {
-			// First connection - create new session
-			switch sigMethod {
-			case signaling.MethodHTTP:
-				answer, err = s.startHTTPSignaling(offer, saltB64)
-			case signaling.MethodRelay:
-				answer, err = s.startRelaySignaling(offer, saltB64)
-			case signaling.MethodManual:
-				answer, err = s.startManualSignaling(offer)
-			case signaling.MethodShortCode:
-				answer, err = s.startShortCodeSignaling(offer, saltB64)
+		// Check if we have a standby peer ready (for instant reconnection)
+		useStandby := !isFirstConnection && s.standbyPeer != nil && s.standbyDc != nil
+		standbyFailed := false
+
+		if useStandby {
+			// Use standby peer - relay already has the correct offer!
+			// This eliminates the race condition where client gets stale offer
+			fmt.Printf("\n  Using standby peer for instant reconnection (code: %s)\n\n", s.shortCodeClient.GetCode())
+
+			peer = s.standbyPeer
+			dc = s.standbyDc
+			s.peer = peer
+			s.standbyPeer = nil
+			s.standbyDc = nil
+			s.standbyOffer = ""
+
+			// Set up connection state monitoring on the standby peer
+			peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+				fmt.Printf("  [WebRTC] Connection state: %s\n", state.String())
+				switch state {
+				case webrtc.PeerConnectionStateDisconnected:
+					fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
+				case webrtc.PeerConnectionStateFailed:
+					fmt.Printf("\n✗ WebRTC connection failed\n")
+					select {
+					case s.disconnected <- true:
+					default:
+					}
+				}
+			})
+
+			peer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+				fmt.Printf("  [ICE] Connection state: %s\n", state.String())
+				switch state {
+				case webrtc.ICEConnectionStateDisconnected:
+					fmt.Printf("\n⚠ ICE disconnected (checking connectivity...)\n")
+				case webrtc.ICEConnectionStateFailed:
+					fmt.Printf("\n✗ ICE failed - NAT/firewall may be blocking UDP\n")
+				}
+			})
+
+			// Just wait for answer - client already has the correct (standby) offer
+			var reconnCtx context.Context
+			var reconnCancel context.CancelFunc
+			if s.opts.Timeout > 0 {
+				reconnCtx, reconnCancel = context.WithTimeout(s.ctx, s.opts.Timeout)
+			} else {
+				reconnCtx, reconnCancel = context.WithCancel(s.ctx)
 			}
-		} else {
-			// Reconnection - update existing session
-			if sigMethod == signaling.MethodShortCode && s.shortCodeClient != nil {
-				fmt.Printf("\n  Waiting for reconnection... (same code: %s)\n\n", s.shortCodeClient.GetCode())
-				err = s.shortCodeClient.UpdateSession(offer, saltB64)
-				if err != nil {
-					fmt.Printf("⚠ Failed to update session: %v\n", err)
-					return err
-				}
-				// Use context for cancellation support
-				var reconnCtx context.Context
-				var reconnCancel context.CancelFunc
-				if s.opts.Timeout > 0 {
-					reconnCtx, reconnCancel = context.WithTimeout(s.ctx, s.opts.Timeout)
-				} else {
-					reconnCtx, reconnCancel = context.WithCancel(s.ctx)
-				}
-				answer, err = s.shortCodeClient.WaitForAnswerWithContext(reconnCtx)
-				reconnCancel()
-				if err != nil && s.ctx.Err() != nil {
+			answer, err = s.shortCodeClient.WaitForAnswerWithContext(reconnCtx)
+			reconnCancel()
+			if err != nil {
+				if s.ctx.Err() != nil {
 					return s.Stop()
 				}
-			} else {
-				// For other methods, fall back to creating new session
+				fmt.Printf("⚠ Standby reconnection failed: %v, creating new peer\n", err)
+				peer.Close()
+				s.peer = nil
+				standbyFailed = true
+			}
+		}
+
+		if !useStandby || standbyFailed {
+			// Create fresh WebRTC peer
+			peer, err = ttwebrtc.NewPeer(s.webrtcConfig)
+			if err != nil {
+				return fmt.Errorf("failed to create peer: %w", err)
+			}
+			s.peer = peer
+
+			// Monitor connection state for debugging and early disconnect detection
+			peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+				fmt.Printf("  [WebRTC] Connection state: %s\n", state.String())
+				switch state {
+				case webrtc.PeerConnectionStateConnected:
+					// Connection established
+				case webrtc.PeerConnectionStateDisconnected:
+					// Note: "disconnected" can recover - don't trigger reconnect yet
+					fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
+				case webrtc.PeerConnectionStateFailed:
+					fmt.Printf("\n✗ WebRTC connection failed\n")
+					select {
+					case s.disconnected <- true:
+					default:
+					}
+				case webrtc.PeerConnectionStateClosed:
+					// Connection closed intentionally
+				}
+			})
+
+			// Monitor ICE connection state for debugging
+			peer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+				fmt.Printf("  [ICE] Connection state: %s\n", state.String())
+				switch state {
+				case webrtc.ICEConnectionStateDisconnected:
+					fmt.Printf("\n⚠ ICE disconnected (checking connectivity...)\n")
+				case webrtc.ICEConnectionStateFailed:
+					fmt.Printf("\n✗ ICE failed - NAT/firewall may be blocking UDP\n")
+				case webrtc.ICEConnectionStateClosed:
+					fmt.Printf("\n⚠ ICE connection closed\n")
+				}
+			})
+
+			// Create data channel
+			dc, err = peer.CreateDataChannel("terminal")
+			if err != nil {
+				return fmt.Errorf("failed to create data channel: %w", err)
+			}
+
+			// Create SDP offer
+			offer, err := peer.CreateOffer()
+			if err != nil {
+				return fmt.Errorf("failed to create offer: %w", err)
+			}
+
+			// Get public IP from STUN (for display purposes) - only on first connection
+			if isFirstConnection {
+				publicIP := peer.GetPublicIP()
+				if publicIP != "" {
+					fmt.Printf("✓ Public IP discovered via STUN: %s\n", publicIP)
+				}
+			}
+
+			if isFirstConnection {
+				// First connection - create new session
 				switch sigMethod {
 				case signaling.MethodHTTP:
 					answer, err = s.startHTTPSignaling(offer, saltB64)
@@ -310,15 +353,50 @@ func (s *Server) Start(ctx ...context.Context) error {
 					answer, err = s.startRelaySignaling(offer, saltB64)
 				case signaling.MethodManual:
 					answer, err = s.startManualSignaling(offer)
+				case signaling.MethodShortCode:
+					answer, err = s.startShortCodeSignaling(offer, saltB64)
+				}
+			} else {
+				// Reconnection without standby - update session with new offer
+				if sigMethod == signaling.MethodShortCode && s.shortCodeClient != nil {
+					fmt.Printf("\n  Waiting for reconnection... (same code: %s)\n\n", s.shortCodeClient.GetCode())
+					err = s.shortCodeClient.UpdateSession(offer, saltB64)
+					if err != nil {
+						fmt.Printf("⚠ Failed to update session: %v\n", err)
+						return err
+					}
+					// Use context for cancellation support
+					var reconnCtx context.Context
+					var reconnCancel context.CancelFunc
+					if s.opts.Timeout > 0 {
+						reconnCtx, reconnCancel = context.WithTimeout(s.ctx, s.opts.Timeout)
+					} else {
+						reconnCtx, reconnCancel = context.WithCancel(s.ctx)
+					}
+					answer, err = s.shortCodeClient.WaitForAnswerWithContext(reconnCtx)
+					reconnCancel()
+					if err != nil && s.ctx.Err() != nil {
+						return s.Stop()
+					}
+				} else {
+					// For other methods, fall back to creating new session
+					switch sigMethod {
+					case signaling.MethodHTTP:
+						answer, err = s.startHTTPSignaling(offer, saltB64)
+					case signaling.MethodRelay:
+						answer, err = s.startRelaySignaling(offer, saltB64)
+					case signaling.MethodManual:
+						answer, err = s.startManualSignaling(offer)
+					}
 				}
 			}
-		}
 
-		if err != nil {
-			if s.ctx.Err() != nil {
-				return s.Stop()
+			if err != nil {
+				if s.ctx.Err() != nil {
+					return s.Stop()
+				}
+				return err
 			}
-			return err
 		}
 
 		fmt.Printf("✓ Received client answer\n")
@@ -469,10 +547,20 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 		isFirstConnection = false
 
-		// Wait for disconnection, keepalive timeout, or termination
+		// Create standby peer for instant reconnection (key to eliminating race conditions)
+		// The relay is updated with the standby offer, so clients always get fresh offers
+		if err := s.createStandbyPeer(); err != nil {
+			fmt.Printf("  [Debug] Standby peer creation failed: %v (reconnects may be slower)\n", err)
+		}
+
+		// Start answer watcher to detect client reconnection (fast reconnect)
+		s.startAnswerWatcher()
+
+		// Wait for disconnection, keepalive timeout, new answer, or termination
 		select {
 		case <-s.disconnected:
 			// Client disconnected, clean up and wait for reconnection
+			s.stopAnswerWatcher()
 			s.cleanupConnection()
 			// Drain any stale disconnected signals (cleanup itself can trigger OnClose)
 			select {
@@ -486,6 +574,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 		case <-keepaliveTimeout:
 			// Keepalive timed out - no pong received within timeout
 			fmt.Printf("\n⚠ Connection timed out (no response from client)\n")
+			s.stopAnswerWatcher()
 			s.cleanupConnection()
 			// Drain any stale disconnected signals
 			select {
@@ -494,6 +583,143 @@ func (s *Server) Start(ctx ...context.Context) error {
 			}
 			time.Sleep(3 * time.Second)
 			continue
+		case receivedAnswer := <-s.newAnswer:
+			// New answer received while connected - client is reconnecting (e.g., page refresh)
+			// With standby peer pattern, this answer IS for the standby offer!
+			// Use it directly for instant reconnection.
+			fmt.Printf("\n✓ Client reconnection detected (instant reconnect with standby peer)\n")
+			s.stopAnswerWatcher()
+
+			// Check if we have a standby peer ready
+			if s.standbyPeer != nil && s.standbyDc != nil && receivedAnswer != "" {
+				// Use standby peer directly with the received answer
+				standbyPeer := s.standbyPeer
+				standbyDc := s.standbyDc
+				s.standbyPeer = nil
+				s.standbyDc = nil
+				s.standbyOffer = ""
+
+				// Clean up current connection
+				s.cleanupConnection()
+
+				// Set remote description on standby peer
+				if err := standbyPeer.SetRemoteDescription(webrtc.SDPTypeAnswer, receivedAnswer); err != nil {
+					fmt.Printf("⚠ Failed to set answer on standby peer: %v\n", err)
+					standbyPeer.Close()
+					continue
+				}
+
+				// Set up connection state monitoring
+				standbyPeer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+					fmt.Printf("  [WebRTC] Connection state: %s\n", state.String())
+					switch state {
+					case webrtc.PeerConnectionStateDisconnected:
+						fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
+					case webrtc.PeerConnectionStateFailed:
+						fmt.Printf("\n✗ WebRTC connection failed\n")
+						select {
+						case s.disconnected <- true:
+						default:
+						}
+					}
+				})
+
+				standbyPeer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+					fmt.Printf("  [ICE] Connection state: %s\n", state.String())
+				})
+
+				// Wait for data channel to open
+				dcOpen := make(chan bool, 1)
+				standbyDc.OnOpen(func() {
+					dcOpen <- true
+				})
+
+				select {
+				case <-dcOpen:
+					fmt.Printf("✓ Data channel connected (instant reconnect)\n")
+				case <-time.After(10 * time.Second):
+					standbyPeer.Close()
+					fmt.Printf("⚠ Standby connection timeout\n")
+					continue
+				case <-s.ctx.Done():
+					return s.Stop()
+				}
+
+				// Connection successful - set as active peer
+				s.peer = standbyPeer
+
+				// Drain any stale disconnected signals
+				select {
+				case <-s.disconnected:
+				default:
+				}
+
+				// Now we need to set up the rest of the connection (encrypted channel, bridge, etc.)
+				// Jump to the post-connection setup by going to a labeled section
+				// For simplicity, let's inline the critical parts here
+
+				// Create encrypted channel
+				channel := ttwebrtc.NewEncryptedChannel(standbyDc, &s.key)
+				channel.SetAltKey(&s.pbkdf2Key)
+				s.channel = channel
+
+				// Resume bridge
+				if s.bridge != nil && s.bridge.IsPaused() {
+					bufferedBytes := s.bridge.Resume(channel.SendData)
+					if bufferedBytes > 0 {
+						fmt.Printf("  [Debug] Replayed %d bytes of buffered output\n", bufferedBytes)
+					}
+				}
+
+				// Handle incoming data
+				channel.OnData(func(data []byte) {
+					s.bridge.HandleData(data)
+				})
+
+				channel.OnResize(func(rows, cols uint16) {
+					s.bridge.HandleResize(rows, cols)
+				})
+
+				channel.OnClose(func() {
+					fmt.Printf("\n✓ Client disconnected (data channel closed)\n")
+					if s.callbacks.OnClientDisconnect != nil {
+						s.callbacks.OnClientDisconnect()
+					}
+					select {
+					case s.disconnected <- true:
+					default:
+					}
+				})
+
+				// Start keepalive
+				keepaliveTimeout = channel.StartKeepalive()
+
+				// Invoke client connect callback
+				if s.callbacks.OnClientConnect != nil {
+					s.callbacks.OnClientConnect()
+				}
+
+				// Create new standby peer for next reconnection
+				if err := s.createStandbyPeer(); err != nil {
+					fmt.Printf("  [Debug] Standby peer creation failed: %v\n", err)
+				}
+
+				// Start answer watcher again
+				s.startAnswerWatcher()
+
+				// Continue waiting for next disconnect
+				continue
+			}
+
+			// No standby peer - fall back to normal reconnection
+			s.cleanupConnection()
+			select {
+			case <-s.disconnected:
+			default:
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
+
 		case <-s.ctx.Done():
 			return s.Stop()
 		}
@@ -529,9 +755,85 @@ func (s *Server) cleanupConnection() {
 	fmt.Printf("  [Debug] cleanupConnection complete\n")
 }
 
+// createStandbyPeer creates a standby peer for instant reconnection
+// This should be called after connection is established
+// The standby offer is immediately uploaded to relay, so clients always get fresh offers
+func (s *Server) createStandbyPeer() error {
+	if s.shortCodeClient == nil {
+		return nil // Only works with relay signaling
+	}
+
+	// Clean up any existing standby peer
+	if s.standbyPeer != nil {
+		s.standbyPeer.Close()
+		s.standbyPeer = nil
+		s.standbyDc = nil
+		s.standbyOffer = ""
+	}
+
+	// Create new WebRTC peer for standby
+	peer, err := ttwebrtc.NewPeer(s.webrtcConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create standby peer: %w", err)
+	}
+
+	// Create data channel
+	dc, err := peer.CreateDataChannel("terminal")
+	if err != nil {
+		peer.Close()
+		return fmt.Errorf("failed to create standby data channel: %w", err)
+	}
+
+	// Create SDP offer
+	offer, err := peer.CreateOffer()
+	if err != nil {
+		peer.Close()
+		return fmt.Errorf("failed to create standby offer: %w", err)
+	}
+
+	// Store standby peer
+	s.standbyPeer = peer
+	s.standbyDc = dc
+	s.standbyOffer = offer
+
+	// Update relay with standby offer - this is the KEY to eliminating race conditions
+	// Client will always get this fresh, unused offer
+	saltB64 := base64.StdEncoding.EncodeToString(s.salt)
+	if err := s.shortCodeClient.UpdateSession(offer, saltB64); err != nil {
+		// Don't fail - just log and continue without standby
+		fmt.Printf("  [Debug] Failed to update relay with standby offer: %v\n", err)
+		s.standbyPeer.Close()
+		s.standbyPeer = nil
+		s.standbyDc = nil
+		s.standbyOffer = ""
+		return err
+	}
+
+	fmt.Printf("  [Debug] Standby peer created and relay updated\n")
+	return nil
+}
+
+// promoteStandbyPeer promotes the standby peer to become the active peer
+// Returns true if standby was available and promoted, false otherwise
+func (s *Server) promoteStandbyPeer() bool {
+	if s.standbyPeer == nil || s.standbyDc == nil {
+		return false
+	}
+
+	// Promote standby to active
+	s.peer = s.standbyPeer
+	s.standbyPeer = nil
+	s.standbyDc = nil
+	s.standbyOffer = ""
+
+	fmt.Printf("  [Debug] Standby peer promoted to active\n")
+	return true
+}
+
 // Stop gracefully shuts down the server
 func (s *Server) Stop() error {
 	s.stopRelayHeartbeat()
+	s.stopAnswerWatcher()
 	if s.bridge != nil {
 		s.bridge.Close()
 	}
@@ -555,6 +857,10 @@ func (s *Server) Stop() error {
 	}
 	if s.viewerPeer != nil {
 		_ = s.viewerPeer.Close()
+	}
+	if s.standbyPeer != nil {
+		_ = s.standbyPeer.Close()
+		s.standbyPeer = nil
 	}
 	if s.upnpClose != nil {
 		s.upnpClose()
@@ -607,6 +913,71 @@ func (s *Server) stopRelayHeartbeat() {
 			close(s.heartbeatStop)
 		}
 		s.heartbeatStop = nil
+	}
+}
+
+// startAnswerWatcher starts a goroutine that polls for new answers while connected
+// This enables fast reconnection when client refreshes (instead of waiting for ICE timeout)
+func (s *Server) startAnswerWatcher() {
+	if s.shortCodeClient == nil {
+		return
+	}
+
+	s.newAnswer = make(chan string, 1)
+	s.answerWatcher = make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-s.answerWatcher:
+				return
+			case <-s.ctx.Done():
+				return
+			default:
+			}
+
+			// Poll for new answer (non-blocking with short timeout)
+			ctx, cancel := context.WithTimeout(s.ctx, 2*time.Second)
+			answer, err := s.shortCodeClient.WaitForAnswerWithContext(ctx)
+			cancel()
+
+			if err != nil {
+				if s.ctx.Err() != nil {
+					return
+				}
+				// No answer yet or timeout - continue polling
+				select {
+				case <-s.answerWatcher:
+					return
+				case <-s.ctx.Done():
+					return
+				case <-time.After(500 * time.Millisecond):
+					continue
+				}
+			}
+
+			// New answer received - signal for immediate reconnection
+			fmt.Printf("\n✓ Client reconnection detected (new answer received)\n")
+			select {
+			case s.newAnswer <- answer:
+			default:
+				// Channel full, answer will be lost but that's ok
+			}
+			return
+		}
+	}()
+}
+
+// stopAnswerWatcher stops the answer watcher goroutine
+func (s *Server) stopAnswerWatcher() {
+	if s.answerWatcher != nil {
+		select {
+		case <-s.answerWatcher:
+			// Already closed
+		default:
+			close(s.answerWatcher)
+		}
+		s.answerWatcher = nil
 	}
 }
 
