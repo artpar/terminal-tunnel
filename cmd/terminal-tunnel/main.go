@@ -375,6 +375,9 @@ func runStartInteractive() error {
 	// Channel to signal when input goroutine should stop
 	inputDone := make(chan struct{})
 
+	// Track the bridge for stdin forwarding
+	var currentBridge *server.Bridge
+
 	// Set callbacks
 	srv.SetCallbacks(server.Callbacks{
 		OnShortCodeReady: func(code, url string) {
@@ -397,22 +400,16 @@ func runStartInteractive() error {
 				fmt.Printf("\n  %s\n", url)
 			}
 
-			fmt.Printf("\n  Waiting for client to connect...\n")
-			fmt.Printf("  Press Ctrl+C to cancel\n\n")
-		},
-		OnClientConnect: func() {
-			// Don't clear screen - keep connection info visible briefly
-		},
-		OnClientDisconnect: func() {
-			// Client disconnected - restore terminal and show message
-			if oldState != nil {
-				_ = term.Restore(stdinFd, oldState)
+			fmt.Printf("\n  Connect from another device. Shell starting below...\n")
+			fmt.Printf("  (Ctrl+C to exit)\n\n")
+
+			// Start PTY immediately - don't wait for client
+			bridge, err := srv.StartPTYEarly()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to start shell: %v\n", err)
+				return
 			}
-			fmt.Printf("\r\n⚠ Client disconnected.\r\n")
-		},
-		OnBridgeReady: func(bridge *server.Bridge) {
-			// Client connected - enter interactive mode
-			fmt.Print("\033[2J\033[H") // Clear screen
+			currentBridge = bridge
 
 			// Set up local output (PTY output -> stdout)
 			bridge.SetLocalOutput(os.Stdout)
@@ -443,11 +440,23 @@ func runStartInteractive() error {
 						}
 						return
 					}
-					if n > 0 {
-						_ = bridge.HandleData(buf[:n])
+					if n > 0 && currentBridge != nil {
+						_ = currentBridge.HandleData(buf[:n])
 					}
 				}
 			}()
+		},
+		OnClientConnect: func() {
+			// Client connected in background - they can now see the session
+			// Note: terminal is in raw mode, use \r\n
+		},
+		OnClientDisconnect: func() {
+			// Client disconnected - shell continues running locally
+			// Note: terminal is in raw mode, use \r\n
+		},
+		OnBridgeReady: func(bridge *server.Bridge) {
+			// Client connected and bridge attached - nothing to do here
+			// since we already started the shell in OnShortCodeReady
 		},
 	})
 

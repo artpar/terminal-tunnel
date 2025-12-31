@@ -171,6 +171,56 @@ func (s *Server) GetBridge() *Bridge {
 	return s.bridge
 }
 
+// StartPTYEarly creates the PTY and bridge immediately (before client connects)
+// This allows the local user to start using the shell while waiting for remote connections.
+// Returns the bridge for setting up local I/O.
+func (s *Server) StartPTYEarly() (*Bridge, error) {
+	if s.pty != nil {
+		// PTY already exists, just return existing bridge
+		return s.bridge, nil
+	}
+
+	pty, err := StartPTY(s.opts.Shell)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start PTY: %w", err)
+	}
+	s.pty = pty
+
+	// Invoke PTY ready callback
+	if s.callbacks.OnPTYReady != nil {
+		s.callbacks.OnPTYReady(pty.Name(), pty.PID())
+	}
+
+	// Start recording if enabled
+	if s.opts.Record && s.recorder == nil {
+		recordPath := s.opts.RecordFile
+		if recordPath == "" {
+			recordPath = recording.GenerateRecordingPath(s.sessionID)
+		}
+		rec, err := recording.NewRecorder(recordPath, 80, 24, "Terminal Tunnel Session")
+		if err != nil {
+			fmt.Printf("⚠ Failed to start recording: %v\n", err)
+		} else {
+			s.recorder = rec
+			fmt.Printf("✓ Recording to: %s\n", recordPath)
+		}
+	}
+
+	// Create bridge with nil sender (local-only mode initially)
+	bridge := NewBridge(s.pty, nil)
+	s.bridge = bridge
+
+	// Attach recorder if enabled
+	if s.recorder != nil {
+		bridge.SetRecorder(s.recorder.WriteOutput)
+	}
+
+	// Start the bridge - it will output to localOutput only until client connects
+	bridge.Start()
+
+	return bridge, nil
+}
+
 // generateSessionID creates a unique session identifier
 func generateSessionID() string {
 	salt, _ := crypto.GenerateSalt()
@@ -479,11 +529,18 @@ func (s *Server) Start(ctx ...context.Context) error {
 		// Create or resume bridge
 		var bridge *Bridge
 		if s.bridge != nil && s.bridge.IsPaused() {
-			// Resume existing bridge - this will flush buffered output
+			// Resume paused bridge (from previous disconnection)
 			bridge = s.bridge
 			bufferedBytes := bridge.Resume(channel.SendData)
 			if bufferedBytes > 0 {
 				fmt.Printf("  [Debug] Replayed %d bytes of buffered output\n", bufferedBytes)
+			}
+		} else if s.bridge != nil {
+			// Bridge already running (started early) - attach WebRTC sender
+			bridge = s.bridge
+			bufferedBytes := bridge.AttachSender(channel.SendData)
+			if bufferedBytes > 0 {
+				fmt.Printf("  [Debug] Client joined session, replayed %d bytes of history\n", bufferedBytes)
 			}
 		} else {
 			// Create new bridge

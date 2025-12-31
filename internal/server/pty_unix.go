@@ -197,6 +197,7 @@ type Bridge struct {
 const defaultBufferMax = 64 * 1024 // 64KB default buffer
 
 // NewBridge creates a bridge between a PTY and a send function
+// send can be nil for local-only mode (PTY output only goes to localOutput)
 func NewBridge(pty *PTY, send func([]byte) error) *Bridge {
 	return &Bridge{
 		pty:       pty,
@@ -205,6 +206,26 @@ func NewBridge(pty *PTY, send func([]byte) error) *Bridge {
 		exited:    make(chan struct{}),
 		bufferMax: defaultBufferMax,
 	}
+}
+
+// AttachSender attaches or updates the primary send function
+// This is used to connect WebRTC channel after PTY is already running
+func (b *Bridge) AttachSender(send func([]byte) error) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Send history buffer to new client for late-join replay
+	bufferedBytes := len(b.historyBuffer)
+	if bufferedBytes > 0 && send != nil {
+		fmt.Printf("  [Debug] Sending %d bytes of history to new client\n", bufferedBytes)
+		history := make([]byte, len(b.historyBuffer))
+		copy(history, b.historyBuffer)
+		go send(history) // Non-blocking send
+	}
+
+	b.send = send
+	b.paused = false
+	return bufferedBytes
 }
 
 // Pause switches the bridge to buffering mode
@@ -345,12 +366,14 @@ func (b *Bridge) readLoop() {
 				continue
 			}
 
-			// Send to primary (control) channel
-			if err := b.send(data); err != nil {
-				fmt.Printf("  [Debug] Bridge send error: %v\n", err)
-				b.mu.Unlock()
-				b.Close()
-				return
+			// Send to primary (control) channel if connected
+			if b.send != nil {
+				if err := b.send(data); err != nil {
+					fmt.Printf("  [Debug] Bridge send error: %v\n", err)
+					b.mu.Unlock()
+					b.Close()
+					return
+				}
 			}
 
 			// Send to viewer channels (best effort - don't fail if viewers disconnect)
