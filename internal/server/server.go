@@ -451,16 +451,28 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 		fmt.Printf("✓ Received client answer\n")
 
+		// Set up data channel open handler BEFORE setting remote description
+		// to avoid race condition where channel opens before handler is set
+		dcOpen := make(chan bool, 1)
+		dc.OnOpen(func() {
+			select {
+			case dcOpen <- true:
+			default:
+			}
+		})
+
 		// Set remote description
 		if err := peer.SetRemoteDescription(webrtc.SDPTypeAnswer, answer); err != nil {
 			return fmt.Errorf("failed to set answer: %w", err)
 		}
 
-		// Wait for data channel to open
-		dcOpen := make(chan bool, 1)
-		dc.OnOpen(func() {
-			dcOpen <- true
-		})
+		// Check if already open (in case OnOpen fired before we got here)
+		if dc.ReadyState() == webrtc.DataChannelStateOpen {
+			select {
+			case dcOpen <- true:
+			default:
+			}
+		}
 
 		select {
 		case <-dcOpen:
