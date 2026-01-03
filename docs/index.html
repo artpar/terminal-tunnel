@@ -1337,6 +1337,10 @@
                     clearTimeout(session.reconnectTimer);
                     session.reconnectTimer = null;
                 }
+                // Reset latency tracking for fresh measurement
+                session.latency = null;
+                session.lastPingTime = Date.now();
+                session.lastPongTime = Date.now();
                 // Send immediate ping to let server know our encryption key (Argon2 vs PBKDF2)
                 sendMessage(session, MSG_PING, new Uint8Array(0));
                 manager.saveSession(session);
@@ -1391,6 +1395,10 @@
                 return;
             }
             session.status = 'disconnected';
+            // Clear latency tracking to avoid stale/wrong values on reconnect
+            session.latency = null;
+            session.lastPingTime = null;
+            session.lastPongTime = null;
             if (session.pingInterval) {
                 clearInterval(session.pingInterval);
                 session.pingInterval = null;
