@@ -1003,14 +1003,14 @@
                     if (session.disconnectTimer) {
                         clearTimeout(session.disconnectTimer);
                     }
-                    console.log('[PC] Connection disconnected, waiting 5s for recovery...');
+                    console.log('[PC] Connection disconnected, waiting 15s for recovery...');
                     session.disconnectTimer = setTimeout(() => {
-                        // If still disconnected after 5 seconds, trigger reconnect
+                        // If still disconnected after 15 seconds, trigger reconnect
                         if (session.pc && session.pc.connectionState === 'disconnected') {
                             console.log('[PC] Connection did not recover, triggering reconnect');
                             handleDisconnect(session, true);
                         }
-                    }, 5000);
+                    }, 15000);
                 } else if (state === 'connected') {
                     // Connection recovered - cancel any pending disconnect
                     if (session.disconnectTimer) {
@@ -1023,6 +1023,54 @@
 
             session.pc.oniceconnectionstatechange = () => {
                 console.log('[ICE] Connection state:', session.pc.iceConnectionState);
+
+                // ICE stall detection: if checking takes > 5 seconds, force restart with fresh session
+                if (session.pc.iceConnectionState === 'checking') {
+                    // Clear any existing stall timer to prevent multiple timers
+                    if (session.iceStallTimer) {
+                        clearTimeout(session.iceStallTimer);
+                    }
+                    session.iceCheckingStart = Date.now();
+                    const currentPc = session.pc; // Capture current peer connection
+                    session.iceStallTimer = setTimeout(async () => {
+                        // Only trigger if this is still the same peer connection and still checking
+                        if (session.pc === currentPc && session.pc.iceConnectionState === 'checking') {
+                            console.log('[ICE] Connection stalled in checking state, forcing retry with fresh session');
+                            // Close current connection
+                            if (session.pc) {
+                                try { session.pc.close(); } catch(e) {}
+                                session.pc = null;
+                            }
+                            if (session.dc) {
+                                try { session.dc.close(); } catch(e) {}
+                                session.dc = null;
+                            }
+                            session.status = 'disconnected';
+                            // Small delay to ensure server has updated session with new offer
+                            await new Promise(r => setTimeout(r, 500));
+                            // Retry with fresh session fetch
+                            attemptAutoReconnect(session);
+                        }
+                    }, 5000); // 5 second stall threshold
+                } else if (session.pc.iceConnectionState === 'connected' ||
+                           session.pc.iceConnectionState === 'completed') {
+                    // ICE succeeded - clear stall timer
+                    if (session.iceStallTimer) {
+                        clearTimeout(session.iceStallTimer);
+                        session.iceStallTimer = null;
+                    }
+                    if (session.iceCheckingStart) {
+                        console.log('[ICE] Connection established in', Date.now() - session.iceCheckingStart, 'ms');
+                        session.iceCheckingStart = null;
+                    }
+                } else if (session.pc.iceConnectionState === 'failed' ||
+                           session.pc.iceConnectionState === 'disconnected') {
+                    // ICE failed - clear stall timer (reconnect will be triggered by pc state change)
+                    if (session.iceStallTimer) {
+                        clearTimeout(session.iceStallTimer);
+                        session.iceStallTimer = null;
+                    }
+                }
             };
 
             await session.pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
@@ -1041,14 +1089,17 @@
 
             statusText.textContent = 'Waiting for connection...';
 
+            // Backup timeout in case ICE stall detection doesn't trigger
             setTimeout(() => {
                 if (session.status === 'connecting') {
-                    statusText.textContent = 'Connection timeout. Host may have disconnected.';
-                    statusText.classList.add('error');
+                    console.log('[Connection] Timeout reached, triggering auto-reconnect');
+                    // Clean up and trigger reconnect
+                    if (session.pc) { try { session.pc.close(); } catch(e) {} session.pc = null; }
+                    if (session.dc) { try { session.dc.close(); } catch(e) {} session.dc = null; }
                     session.status = 'disconnected';
-                    manager.updateUI();
+                    attemptAutoReconnect(session);
                 }
-            }, 15000);
+            }, 10000); // 10 second backup timeout (ICE stall should trigger at 5s)
         }
 
         function setupDataChannel(session) {
@@ -1313,18 +1364,52 @@
 
             // Only send input if not in read-only mode
             if (!session.readOnly) {
+                // Input coalescing: buffer keystrokes and send in batches (reduces overhead)
+                let inputBuffer = '';
+                let inputTimer = null;
+                const COALESCE_MS = 16; // ~1 frame at 60fps
+
                 session.term.onData((data) => {
-                    sendMessage(session, MSG_DATA, new TextEncoder().encode(data));
+                    inputBuffer += data;
+                    if (!inputTimer) {
+                        inputTimer = setTimeout(() => {
+                            if (inputBuffer) {
+                                sendMessage(session, MSG_DATA, new TextEncoder().encode(inputBuffer));
+                                inputBuffer = '';
+                            }
+                            inputTimer = null;
+                        }, COALESCE_MS);
+                    }
                 });
             }
 
             // Mobile input handling (disabled in read-only mode)
             if (mobile && !session.readOnly) {
                 mobileInput.classList.add('active');
+                // Mobile input coalescing
+                let mobileBuffer = '';
+                let mobileTimer = null;
+                const MOBILE_COALESCE_MS = 16;
+
+                const flushMobileBuffer = () => {
+                    if (mobileBuffer) {
+                        sendMessage(session, MSG_DATA, new TextEncoder().encode(mobileBuffer));
+                        mobileBuffer = '';
+                    }
+                    mobileTimer = null;
+                };
+
+                const queueMobileInput = (data) => {
+                    mobileBuffer += data;
+                    if (!mobileTimer) {
+                        mobileTimer = setTimeout(flushMobileBuffer, MOBILE_COALESCE_MS);
+                    }
+                };
+
                 // Use named handlers so they can be removed on cleanup
                 session.mobileInputHandler = (e) => {
                     if (e.target.value) {
-                        sendMessage(session, MSG_DATA, new TextEncoder().encode(e.target.value));
+                        queueMobileInput(e.target.value);
                         e.target.value = '';
                     }
                 };
@@ -1341,7 +1426,7 @@
                         case 'ArrowLeft': data = '\x1b[D'; break;
                     }
                     if (data) {
-                        sendMessage(session, MSG_DATA, new TextEncoder().encode(data));
+                        queueMobileInput(data);
                         e.preventDefault();
                     }
                 };
@@ -1475,6 +1560,8 @@
             return { type, payload: data.slice(3, 3 + length) };
         }
 
+        const MAX_BUFFER_SIZE = 64 * 1024; // 64KB backpressure threshold
+
         async function sendMessage(session, type, payload) {
             const msg = new Uint8Array(3 + payload.length);
             msg[0] = type;
@@ -1483,7 +1570,24 @@
             msg.set(payload, 3);
             const encrypted = await encrypt(session, msg);
             if (session.dc && session.dc.readyState === 'open') {
-                session.dc.send(encrypted);
+                // Backpressure: wait if buffer is too full
+                if (session.dc.bufferedAmount > MAX_BUFFER_SIZE) {
+                    await new Promise(resolve => {
+                        const check = () => {
+                            if (!session.dc || session.dc.readyState !== 'open') {
+                                resolve();
+                            } else if (session.dc.bufferedAmount <= MAX_BUFFER_SIZE / 2) {
+                                resolve();
+                            } else {
+                                setTimeout(check, 10);
+                            }
+                        };
+                        check();
+                    });
+                }
+                if (session.dc && session.dc.readyState === 'open') {
+                    session.dc.send(encrypted);
+                }
             }
         }
 
