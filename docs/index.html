@@ -241,6 +241,28 @@
         }
         .form-row input::placeholder { color: #555; }
 
+        .password-wrapper {
+            position: relative;
+            display: flex;
+        }
+        .password-wrapper input {
+            flex: 1;
+            padding-right: 44px;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+        .password-toggle:hover { color: #999; }
+
         .form-row.optional label::after {
             content: ' (optional)';
             color: #555;
@@ -660,6 +682,32 @@
             deleteSavedSession(code) {
                 this.savedSessions = this.savedSessions.filter(s => s.code !== code);
                 this.saveSessions();
+                // Also delete saved password
+                this.deletePassword(code);
+            }
+
+            // Password storage (separate from session data)
+            getSavedPassword(code) {
+                try {
+                    const passwords = JSON.parse(localStorage.getItem(STORAGE_KEY + '_passwords')) || {};
+                    return passwords[code] || '';
+                } catch { return ''; }
+            }
+
+            savePassword(code, password) {
+                try {
+                    const passwords = JSON.parse(localStorage.getItem(STORAGE_KEY + '_passwords')) || {};
+                    passwords[code] = password;
+                    localStorage.setItem(STORAGE_KEY + '_passwords', JSON.stringify(passwords));
+                } catch {}
+            }
+
+            deletePassword(code) {
+                try {
+                    const passwords = JSON.parse(localStorage.getItem(STORAGE_KEY + '_passwords')) || {};
+                    delete passwords[code];
+                    localStorage.setItem(STORAGE_KEY + '_passwords', JSON.stringify(passwords));
+                } catch {}
             }
 
             createSession() {
@@ -912,6 +960,7 @@
 
             if (mode === 'password') {
                 statusText.textContent = `Session: ${session.code}`;
+                const savedPassword = manager.getSavedPassword(session.code);
                 formArea.innerHTML = `
                     <div class="form-row optional">
                         <label>Name</label>
@@ -919,7 +968,10 @@
                     </div>
                     <div class="form-row">
                         <label>Password</label>
-                        <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                        <div class="password-wrapper">
+                            <input type="password" class="password-input" placeholder="Session password" autocomplete="off" value="${escapeHtml(savedPassword)}">
+                            <button type="button" class="password-toggle">Show</button>
+                        </div>
                     </div>
                     <button class="connect-btn">Connect</button>
                 `;
@@ -947,7 +999,10 @@
                     </div>
                     <div class="form-row">
                         <label>Password</label>
-                        <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                        <div class="password-wrapper">
+                            <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                            <button type="button" class="password-toggle">Show</button>
+                        </div>
                     </div>
                     <div class="form-row optional">
                         <label>Name</label>
@@ -960,6 +1015,7 @@
             // Event listeners
             const connectBtn = formArea.querySelector('.connect-btn');
             const passwordInput = formArea.querySelector('.password-input');
+            const passwordToggle = formArea.querySelector('.password-toggle');
             const codeInput = formArea.querySelector('.code-input');
             const nameInput = formArea.querySelector('.name-input');
 
@@ -967,6 +1023,16 @@
             passwordInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') startConnection(session, formArea);
             });
+
+            // Password show/hide toggle
+            if (passwordToggle) {
+                passwordToggle.addEventListener('click', () => {
+                    const isPassword = passwordInput.type === 'password';
+                    passwordInput.type = isPassword ? 'text' : 'password';
+                    passwordToggle.textContent = isPassword ? 'Hide' : 'Show';
+                });
+            }
+
             if (codeInput) {
                 codeInput.addEventListener('keypress', (e) => {
                     if (e.key === 'Enter') passwordInput.focus();
@@ -992,6 +1058,9 @@
                     if (codeInput) codeInput.value = el.dataset.code;
                     if (nameInput) nameInput.value = el.dataset.name;
                     session.relayUrl = el.dataset.relay;
+                    // Load saved password for this session
+                    const savedPwd = manager.getSavedPassword(el.dataset.code);
+                    if (savedPwd) passwordInput.value = savedPwd;
                     passwordInput.focus();
                 });
             });
@@ -1271,6 +1340,10 @@
                 // Send immediate ping to let server know our encryption key (Argon2 vs PBKDF2)
                 sendMessage(session, MSG_PING, new Uint8Array(0));
                 manager.saveSession(session);
+                // Save password for quick reconnect
+                if (session.password) {
+                    manager.savePassword(session.code, session.password);
+                }
                 showTerminal(session);
                 startPingInterval(session);
                 manager.updateUI();
