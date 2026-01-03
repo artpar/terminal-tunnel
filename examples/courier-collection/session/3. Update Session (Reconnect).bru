@@ -1,0 +1,85 @@
+meta {
+  name: 3. Update Session (Reconnect)
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/session/{{sessionCode}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "sdp": "{{testSdp}}",
+    "salt": "{{testSalt}}"
+  }
+}
+
+docs {
+  # Update Session (Reconnect)
+
+  Updates an existing session with a new SDP offer for reconnection scenarios.
+
+  ## Use Case
+  When a WebRTC connection drops and the host needs to re-offer, they can
+  update the existing session code instead of creating a new one. This allows
+  clients to reconnect using the same code.
+
+  ## Request Body
+  - `sdp`: New SDP offer
+  - `salt`: New salt (optional, keeps existing if not provided)
+
+  ## Response
+  - `status`: "ok" on success
+
+  ## Notes
+  - Clears any existing answer
+  - Resets the session expiry timer
+}
+
+script:pre-request {
+  const code = bru.getVar("sessionCode");
+
+  if (!code) {
+    throw new Error("sessionCode is not set. Run 'Create Session' first.");
+  }
+
+  console.log(`Updating session ${code} for reconnection...`);
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    console.log("Session updated successfully - ready for new connection");
+    bru.setVar("sessionUpdatedAt", new Date().toISOString());
+  } else if (res.getStatus() === 404) {
+    console.error("Session not found - cannot update expired session");
+  }
+}
+
+tests {
+  test("Status is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response confirms update", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("status");
+    expect(body.status).to.equal("ok");
+  });
+
+  test("Response time is acceptable", function() {
+    expect(res.getResponseTime()).to.be.below(2000);
+  });
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq ok
+}

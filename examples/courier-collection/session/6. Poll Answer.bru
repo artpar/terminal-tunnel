@@ -1,0 +1,105 @@
+meta {
+  name: 6. Poll Answer
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/session/{{sessionCode}}/answer
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+docs {
+  # Poll Answer
+
+  Long-polls for the client's SDP answer.
+
+  ## Behavior
+  - If answer exists: Returns immediately with `{ "sdp": "..." }`
+  - If no answer: Waits up to 30 seconds, then returns `{ "status": "waiting" }`
+
+  ## Use Case
+  The host uses this endpoint when not connected via WebSocket to wait
+  for a client to submit their answer.
+
+  ## Response (success)
+  - `sdp`: The client's SDP answer
+
+  ## Response (waiting)
+  - `status`: "waiting"
+
+  ## Notes
+  - This is a long-polling endpoint (may take up to 30 seconds)
+  - Use WebSocket for more efficient real-time notification
+}
+
+script:pre-request {
+  const code = bru.getVar("sessionCode");
+
+  if (!code) {
+    throw new Error("sessionCode is not set. Run 'Create Session' first.");
+  }
+
+  console.log(`Polling for answer on session ${code}...`);
+  console.log("This may take up to 30 seconds if no answer is available.");
+
+  bru.setVar("pollStartTime", Date.now());
+}
+
+script:post-response {
+  const startTime = bru.getVar("pollStartTime");
+  const pollDuration = Date.now() - startTime;
+
+  console.log(`Poll completed in ${pollDuration}ms`);
+
+  const body = res.getBody();
+
+  if (body.sdp) {
+    console.log("Answer received!");
+    console.log(`Answer SDP length: ${body.sdp.length} characters`);
+    bru.setVar("receivedAnswer", body.sdp);
+  } else if (body.status === "waiting") {
+    console.log("No answer yet - client has not responded");
+  } else {
+    console.log(`Unexpected response: ${JSON.stringify(body)}`);
+  }
+}
+
+tests {
+  test("Status is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response has sdp or status", function() {
+    const body = res.getBody();
+    const hasSdp = body.hasOwnProperty("sdp");
+    const hasStatus = body.hasOwnProperty("status");
+
+    expect(hasSdp || hasStatus).to.be.true;
+  });
+
+  test("If answer present, SDP is valid", function() {
+    const body = res.getBody();
+    if (body.sdp) {
+      expect(body.sdp).to.be.a("string");
+      expect(body.sdp.length).to.be.above(0);
+      expect(body.sdp).to.include("v=");
+    }
+  });
+
+  test("If waiting, status is correct", function() {
+    const body = res.getBody();
+    if (body.status) {
+      expect(body.status).to.equal("waiting");
+    }
+  });
+}
+
+assert {
+  res.status: eq 200
+}

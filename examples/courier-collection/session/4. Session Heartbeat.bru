@@ -1,0 +1,83 @@
+meta {
+  name: 4. Session Heartbeat
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/session/{{sessionCode}}
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+docs {
+  # Session Heartbeat
+
+  Sends a heartbeat to keep the session alive.
+
+  ## Purpose
+  Sessions expire after 5 minutes of inactivity. The host should send
+  periodic heartbeats to prevent expiration while waiting for a client
+  to connect.
+
+  ## Response
+  - `status`: "ok" on success
+
+  ## Recommended Usage
+  Send heartbeat every 2-3 minutes while waiting for connection.
+}
+
+script:pre-request {
+  const code = bru.getVar("sessionCode");
+
+  if (!code) {
+    throw new Error("sessionCode is not set. Run 'Create Session' first.");
+  }
+
+  console.log(`Sending heartbeat for session ${code}...`);
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const lastHeartbeat = bru.getVar("lastHeartbeat");
+    const now = new Date().toISOString();
+
+    if (lastHeartbeat) {
+      const elapsed = Date.now() - new Date(lastHeartbeat).getTime();
+      console.log(`Heartbeat successful (${elapsed}ms since last)`);
+    } else {
+      console.log("First heartbeat successful");
+    }
+
+    bru.setVar("lastHeartbeat", now);
+  } else if (res.getStatus() === 404) {
+    console.error("Session expired!");
+    bru.setVar("sessionCode", null);
+  }
+}
+
+tests {
+  test("Status is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response confirms heartbeat", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("status");
+    expect(body.status).to.equal("ok");
+  });
+
+  test("Response is fast (heartbeat should be quick)", function() {
+    expect(res.getResponseTime()).to.be.below(1000);
+  });
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq ok
+  res.responseTime: lte 1000
+}

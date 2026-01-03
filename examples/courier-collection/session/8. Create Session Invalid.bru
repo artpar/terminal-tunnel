@@ -1,0 +1,68 @@
+meta {
+  name: 8. Create Session Invalid
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/session
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "salt": "some-salt-without-sdp"
+  }
+}
+
+docs {
+  # Create Session - Invalid Request (Error Test)
+
+  Tests error handling when required fields are missing.
+
+  ## Purpose
+  Demonstrates validation error responses.
+
+  ## Expected Response
+  - Status: 400 Bad Request
+  - Body: Error message about missing SDP
+}
+
+script:pre-request {
+  console.log("Testing validation error - missing required SDP field...");
+}
+
+script:post-response {
+  if (res.getStatus() === 400) {
+    console.log("Correct! Server returned 400 for missing SDP");
+    const body = res.getBody();
+    if (body.error) {
+      console.log(`Error message: ${body.error}`);
+    }
+  } else {
+    console.warn(`Unexpected status: ${res.getStatus()}`);
+  }
+}
+
+tests {
+  test("Status is 400 Bad Request", function() {
+    expect(res.getStatus()).to.equal(400);
+  });
+
+  test("Response indicates SDP is required", function() {
+    // Response might be text or JSON depending on implementation
+    const body = res.getBody();
+    const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+    expect(bodyStr.toLowerCase()).to.include("sdp");
+  });
+}
+
+assert {
+  res.status: eq 400
+}

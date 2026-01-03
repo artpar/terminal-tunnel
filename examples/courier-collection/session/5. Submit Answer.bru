@@ -1,0 +1,96 @@
+meta {
+  name: 5. Submit Answer
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/session/{{sessionCode}}/answer
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "sdp": "{{testAnswer}}"
+  }
+}
+
+docs {
+  # Submit Answer
+
+  Submits an SDP answer from the client to complete the WebRTC handshake.
+
+  ## Flow
+  1. Client fetches session using GET /session/{code}
+  2. Client creates WebRTC answer using the offer SDP
+  3. Client submits answer via this endpoint
+  4. Host polls for answer or receives via WebSocket
+
+  ## Request Body
+  - `sdp`: SDP answer from the client
+
+  ## Response
+  - `status`: "ok" on success
+
+  ## Notes
+  - Answer is stored and forwarded to host if connected via WebSocket
+  - Only one answer can be submitted per session
+}
+
+script:pre-request {
+  const code = bru.getVar("sessionCode");
+  const answer = bru.getEnvVar("testAnswer");
+
+  if (!code) {
+    throw new Error("sessionCode is not set. Run 'Create Session' first.");
+  }
+
+  if (!answer) {
+    throw new Error("testAnswer environment variable is required");
+  }
+
+  console.log(`Submitting answer for session ${code}...`);
+  console.log(`Answer SDP length: ${answer.length} characters`);
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    console.log("Answer submitted successfully!");
+    console.log("WebRTC handshake can now complete.");
+
+    bru.setVar("answerSubmittedAt", new Date().toISOString());
+    bru.setVar("answerSubmitted", true);
+  } else if (res.getStatus() === 404) {
+    console.error("Session not found - may have expired");
+  } else {
+    console.error(`Failed to submit answer: ${res.getStatus()}`);
+    console.error(JSON.stringify(res.getBody()));
+  }
+}
+
+tests {
+  test("Status is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response confirms submission", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("status");
+    expect(body.status).to.equal("ok");
+  });
+
+  test("Response time is acceptable", function() {
+    expect(res.getResponseTime()).to.be.below(2000);
+  });
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq ok
+}

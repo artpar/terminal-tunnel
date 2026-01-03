@@ -1,0 +1,132 @@
+meta {
+  name: 1. Create Session
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/session
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "sdp": "{{testSdp}}",
+    "salt": "{{testSalt}}"
+  }
+}
+
+docs {
+  # Create Session
+
+  Creates a new terminal session and returns a short code for sharing.
+
+  ## Request Body
+  - `sdp`: SDP offer from the host (WebRTC session description)
+  - `salt`: Base64-encoded salt for key derivation (16 bytes)
+
+  ## Response
+  - `code`: 8-character session code (e.g., "ABCD1234")
+  - `expires_in`: Session TTL in seconds (default: 300)
+  - `url`: Optional client URL if configured
+
+  ## Example Flow
+  1. Host starts session: `tt start -p password`
+  2. This API is called with the SDP offer
+  3. Client uses the code to connect
+}
+
+vars:post-response {
+  sessionCode: res.body.code
+}
+
+script:pre-request {
+  // Pre-flight script
+  console.log("Creating new terminal session...");
+
+  // Validate required variables
+  const sdp = bru.getEnvVar("testSdp");
+  const salt = bru.getEnvVar("testSalt");
+
+  if (!sdp) {
+    throw new Error("testSdp environment variable is required");
+  }
+  if (!salt) {
+    throw new Error("testSalt environment variable is required");
+  }
+
+  // Log request details (for debugging)
+  console.log(`SDP length: ${sdp.length} characters`);
+  console.log(`Salt: ${salt.substring(0, 10)}...`);
+}
+
+script:post-response {
+  // Post-flight script
+  const body = res.getBody();
+
+  if (res.getStatus() === 200 && body.code) {
+    console.log(`Session created successfully!`);
+    console.log(`Code: ${body.code}`);
+    console.log(`Expires in: ${body.expires_in} seconds`);
+
+    // Store for subsequent requests
+    bru.setVar("sessionCode", body.code);
+    bru.setVar("sessionCreatedAt", new Date().toISOString());
+    bru.setVar("sessionExpiresIn", body.expires_in);
+
+    if (body.url) {
+      console.log(`Client URL: ${body.url}`);
+      bru.setVar("clientUrl", body.url);
+    }
+  } else {
+    console.error(`Failed to create session: ${res.getStatus()}`);
+    console.error(`Response: ${JSON.stringify(body)}`);
+  }
+}
+
+tests {
+  test("Status is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response has session code", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("code");
+    expect(body.code).to.be.a("string");
+    expect(body.code.length).to.equal(8);
+  });
+
+  test("Session code format is valid", function() {
+    const body = res.getBody();
+    // Code should only contain allowed characters (no 0, O, 1, I, l)
+    expect(body.code).to.match(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]+$/);
+  });
+
+  test("Response has expires_in", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("expires_in");
+    expect(body.expires_in).to.be.a("number");
+    expect(body.expires_in).to.be.above(0);
+  });
+
+  test("Content-Type is JSON", function() {
+    expect(res.getHeader("content-type")).to.include("application/json");
+  });
+
+  test("Response time is acceptable", function() {
+    expect(res.getResponseTime()).to.be.below(3000);
+  });
+}
+
+assert {
+  res.status: eq 200
+  res.body.code: isDefined
+  res.body.expires_in: isNumber
+  res.responseTime: lte 3000
+}

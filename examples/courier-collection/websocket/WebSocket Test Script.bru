@@ -1,0 +1,156 @@
+meta {
+  name: WebSocket Test Script
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/health
+  body: none
+  auth: none
+}
+
+docs {
+  # WebSocket Test Script
+
+  This file contains a shell script to test WebSocket functionality.
+
+  Since Bruno doesn't support WebSocket, copy and run this script:
+
+  ## Prerequisites
+  ```bash
+  # Install wscat
+  npm install -g wscat
+
+  # Or use websocat
+  brew install websocat  # macOS
+  ```
+
+  ## Test Script
+
+  Save as `test-websocket.sh` and run:
+
+  ```bash
+  #!/bin/bash
+
+  RELAY_URL="${1:-ws://localhost:8765}"
+  SESSION_ID="${2:-TEST$(date +%s)}"
+
+  echo "Testing WebSocket relay at: $RELAY_URL"
+  echo "Session ID: $SESSION_ID"
+  echo ""
+
+  # Test 1: Basic connection
+  echo "=== Test 1: Basic Connection ==="
+  timeout 5 wscat -c "$RELAY_URL/ws?session=$SESSION_ID" -x '{"type":"register","session_id":"'$SESSION_ID'","role":"host"}' 2>&1 || echo "Connection test complete"
+
+  echo ""
+  echo "=== Test 2: Full Flow (requires two terminals) ==="
+  echo ""
+  echo "Terminal 1 (Host):"
+  echo "  wscat -c '$RELAY_URL/ws?session=$SESSION_ID'"
+  echo "  Send: {\"type\":\"register\",\"session_id\":\"$SESSION_ID\",\"role\":\"host\"}"
+  echo "  Send: {\"type\":\"offer\",\"session_id\":\"$SESSION_ID\",\"sdp\":\"test-sdp\",\"salt\":\"test-salt\"}"
+  echo ""
+  echo "Terminal 2 (Client):"
+  echo "  wscat -c '$RELAY_URL/ws?session=$SESSION_ID'"
+  echo "  Send: {\"type\":\"register\",\"session_id\":\"$SESSION_ID\",\"role\":\"client\"}"
+  echo "  (Should receive offer)"
+  echo "  Send: {\"type\":\"answer\",\"session_id\":\"$SESSION_ID\",\"sdp\":\"answer-sdp\"}"
+  ```
+
+  ## Node.js Test Script
+
+  ```javascript
+  // test-websocket.js
+  const WebSocket = require('ws');
+
+  const RELAY_URL = process.env.RELAY_URL || 'ws://localhost:8765';
+  const SESSION_ID = 'TEST' + Date.now();
+
+  console.log(`Testing WebSocket at: ${RELAY_URL}`);
+  console.log(`Session ID: ${SESSION_ID}`);
+
+  // Host connection
+  const host = new WebSocket(`${RELAY_URL}/ws?session=${SESSION_ID}`);
+
+  host.on('open', () => {
+    console.log('[Host] Connected');
+
+    // Register as host
+    host.send(JSON.stringify({
+      type: 'register',
+      session_id: SESSION_ID,
+      role: 'host'
+    }));
+
+    // Send offer after a short delay
+    setTimeout(() => {
+      console.log('[Host] Sending offer');
+      host.send(JSON.stringify({
+        type: 'offer',
+        session_id: SESSION_ID,
+        sdp: 'v=0\\r\\no=-...',
+        salt: 'dGVzdC1zYWx0'
+      }));
+    }, 100);
+  });
+
+  host.on('message', (data) => {
+    const msg = JSON.parse(data);
+    console.log('[Host] Received:', msg.type);
+    if (msg.type === 'answer') {
+      console.log('[Host] Got answer! Handshake complete.');
+      host.close();
+      client.close();
+      process.exit(0);
+    }
+  });
+
+  // Client connection (delayed)
+  setTimeout(() => {
+    const client = new WebSocket(`${RELAY_URL}/ws?session=${SESSION_ID}`);
+
+    client.on('open', () => {
+      console.log('[Client] Connected');
+      client.send(JSON.stringify({
+        type: 'register',
+        session_id: SESSION_ID,
+        role: 'client'
+      }));
+    });
+
+    client.on('message', (data) => {
+      const msg = JSON.parse(data);
+      console.log('[Client] Received:', msg.type);
+      if (msg.type === 'offer') {
+        console.log('[Client] Got offer, sending answer');
+        client.send(JSON.stringify({
+          type: 'answer',
+          session_id: SESSION_ID,
+          sdp: 'v=0\\r\\no=-... (answer)'
+        }));
+      }
+    });
+  }, 500);
+
+  // Timeout
+  setTimeout(() => {
+    console.log('Test timeout');
+    process.exit(1);
+  }, 10000);
+  ```
+
+  Run with: `node test-websocket.js`
+}
+
+script:pre-request {
+  console.log("This request verifies the server is running.");
+  console.log("See documentation for WebSocket test scripts.");
+}
+
+tests {
+  test("Server is running (prerequisite for WebSocket)", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

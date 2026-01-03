@@ -1,0 +1,176 @@
+meta {
+  name: WebSocket Connection
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{wsUrl}}/ws?session={{sessionCode}}
+  body: none
+  auth: none
+}
+
+docs {
+  # WebSocket Connection
+
+  Real-time signaling via WebSocket for SDP exchange.
+
+  **Note:** Bruno does not natively support WebSocket connections.
+  This documentation describes the WebSocket protocol for reference.
+
+  ## Connection URL
+  ```
+  ws://localhost:8765/ws?session=<code>
+  wss://relay.example.com/ws?session=<code>
+  ```
+
+  ## Protocol
+
+  ### Message Types
+
+  All messages are JSON with a `type` field:
+
+  #### 1. Register (Client → Server)
+  ```json
+  {
+    "type": "register",
+    "session_id": "ABCD1234",
+    "role": "host"  // or "client"
+  }
+  ```
+
+  #### 2. Offer (Host → Server → Client)
+  ```json
+  {
+    "type": "offer",
+    "session_id": "ABCD1234",
+    "sdp": "<SDP offer>",
+    "salt": "<base64 salt>"
+  }
+  ```
+
+  #### 3. Answer (Client → Server → Host)
+  ```json
+  {
+    "type": "answer",
+    "session_id": "ABCD1234",
+    "sdp": "<SDP answer>"
+  }
+  ```
+
+  #### 4. Error (Server → Client)
+  ```json
+  {
+    "type": "error",
+    "error": "Session not found"
+  }
+  ```
+
+  ## Example Flow
+
+  ### Host Side
+  ```javascript
+  const ws = new WebSocket('ws://localhost:8765/ws?session=MYCODE');
+
+  ws.onopen = () => {
+    // 1. Register as host
+    ws.send(JSON.stringify({
+      type: 'register',
+      session_id: 'MYCODE',
+      role: 'host'
+    }));
+
+    // 2. Send offer
+    ws.send(JSON.stringify({
+      type: 'offer',
+      session_id: 'MYCODE',
+      sdp: myOffer,
+      salt: mySalt
+    }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'answer') {
+      // 3. Received answer from client
+      completeHandshake(msg.sdp);
+    }
+  };
+  ```
+
+  ### Client Side
+  ```javascript
+  const ws = new WebSocket('ws://localhost:8765/ws?session=MYCODE');
+
+  ws.onopen = () => {
+    // 1. Register as client
+    ws.send(JSON.stringify({
+      type: 'register',
+      session_id: 'MYCODE',
+      role: 'client'
+    }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'offer') {
+      // 2. Received offer, create and send answer
+      const answer = createAnswer(msg.sdp, msg.salt);
+      ws.send(JSON.stringify({
+        type: 'answer',
+        session_id: 'MYCODE',
+        sdp: answer
+      }));
+    }
+  };
+  ```
+
+  ## Testing WebSocket
+
+  Use wscat or websocat for command-line testing:
+
+  ```bash
+  # Install wscat
+  npm install -g wscat
+
+  # Connect as host
+  wscat -c "ws://localhost:8765/ws?session=TEST1234"
+
+  # Then send messages:
+  {"type":"register","session_id":"TEST1234","role":"host"}
+  {"type":"offer","session_id":"TEST1234","sdp":"v=0...","salt":"base64salt=="}
+  ```
+
+  ## Rate Limiting
+
+  The WebSocket endpoint has rate limiting:
+  - 30 requests per IP per minute
+  - Connections from same IP share the limit
+
+  ## Allowed Origins
+
+  CORS is enforced for WebSocket upgrades:
+  - https://artpar.github.io
+  - http://localhost
+  - http://localhost:8080
+  - http://127.0.0.1
+  - http://127.0.0.1:8080
+}
+
+script:pre-request {
+  console.log("=== WebSocket Documentation ===");
+  console.log("Bruno does not support WebSocket connections natively.");
+  console.log("This request will fail, but serves as documentation.");
+  console.log("");
+  console.log("To test WebSocket, use:");
+  console.log("  wscat -c 'ws://localhost:8765/ws?session=TEST'");
+}
+
+tests {
+  // This test documents expected behavior, not actual WebSocket testing
+  test("WebSocket endpoint exists (will fail on HTTP)", function() {
+    // HTTP GET to WebSocket endpoint returns 400 (Bad Request)
+    // or upgrade required - both are acceptable
+    expect(res.getStatus()).to.be.oneOf([400, 426, 500]);
+  });
+}

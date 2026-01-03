@@ -1,0 +1,66 @@
+meta {
+  name: 7. Get Session Not Found
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/session/INVALID9
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+docs {
+  # Get Session - Not Found (Error Test)
+
+  Tests the error response when requesting a non-existent session.
+
+  ## Purpose
+  Demonstrates proper error handling and 404 responses.
+
+  ## Expected Response
+  - Status: 404 Not Found
+  - Body: `{ "error": "Session not found" }`
+}
+
+script:pre-request {
+  console.log("Testing 404 error handling with invalid session code...");
+}
+
+script:post-response {
+  if (res.getStatus() === 404) {
+    console.log("Correct! Server returned 404 for invalid session");
+    console.log(`Error message: ${res.getBody()?.error}`);
+  } else {
+    console.warn(`Unexpected status: ${res.getStatus()}`);
+  }
+}
+
+tests {
+  test("Status is 404", function() {
+    expect(res.getStatus()).to.equal(404);
+  });
+
+  test("Response has error message", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("error");
+  });
+
+  test("Error message is descriptive", function() {
+    const body = res.getBody();
+    expect(body.error.toLowerCase()).to.include("not found");
+  });
+
+  test("Response is JSON", function() {
+    expect(res.getHeader("content-type")).to.include("application/json");
+  });
+}
+
+assert {
+  res.status: eq 404
+  res.body.error: isDefined
+}

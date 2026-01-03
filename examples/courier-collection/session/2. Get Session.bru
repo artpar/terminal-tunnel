@@ -1,0 +1,106 @@
+meta {
+  name: 2. Get Session
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/session/{{sessionCode}}
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+docs {
+  # Get Session
+
+  Retrieves the SDP offer and salt for a session by its code.
+
+  ## URL Parameters
+  - `code`: 8-character session code from Create Session
+
+  ## Response
+  - `sdp`: SDP offer from the host
+  - `salt`: Base64-encoded salt for key derivation
+  - `used`: Boolean indicating if an answer was already submitted
+
+  ## Notes
+  - Session expires after 5 minutes of inactivity
+  - Accessing this endpoint refreshes the session TTL
+}
+
+script:pre-request {
+  // Pre-flight validation
+  const code = bru.getVar("sessionCode");
+
+  if (!code) {
+    throw new Error("sessionCode is not set. Run 'Create Session' first.");
+  }
+
+  console.log(`Fetching session: ${code}`);
+}
+
+script:post-response {
+  // Post-flight processing
+  const body = res.getBody();
+
+  if (res.getStatus() === 200) {
+    console.log("Session retrieved successfully");
+    console.log(`SDP length: ${body.sdp?.length || 0} characters`);
+    console.log(`Salt: ${body.salt?.substring(0, 10)}...`);
+    console.log(`Used: ${body.used}`);
+
+    // Store for comparison in tests
+    bru.setVar("retrievedSdp", body.sdp);
+    bru.setVar("retrievedSalt", body.salt);
+  } else if (res.getStatus() === 404) {
+    console.error("Session not found - it may have expired");
+  }
+}
+
+tests {
+  test("Status is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response has SDP", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("sdp");
+    expect(body.sdp).to.be.a("string");
+    expect(body.sdp.length).to.be.above(0);
+  });
+
+  test("Response has salt", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("salt");
+    expect(body.salt).to.be.a("string");
+  });
+
+  test("SDP contains required WebRTC fields", function() {
+    const body = res.getBody();
+    const sdp = body.sdp;
+
+    // Basic SDP validation
+    expect(sdp).to.include("v=");
+    expect(sdp).to.include("o=");
+  });
+
+  test("Salt is base64 encoded", function() {
+    const body = res.getBody();
+    // Base64 should only contain valid characters
+    expect(body.salt).to.match(/^[A-Za-z0-9+/=]+$/);
+  });
+
+  test("Response time is acceptable", function() {
+    expect(res.getResponseTime()).to.be.below(2000);
+  });
+}
+
+assert {
+  res.status: eq 200
+  res.body.sdp: isDefined
+  res.body.salt: isDefined
+}
