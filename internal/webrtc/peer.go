@@ -26,12 +26,17 @@ var defaultSTUNServers = []string{
 	"stun:stun2.l.google.com:19302",
 }
 
-// Note: No default TURN servers - public TURN services require signup
-// Users can configure TURN via environment variables:
-//   TURN_URL=turn:your-server.com:3478
-//   TURN_USERNAME=your-username
-//   TURN_PASSWORD=your-password
-// Or use --no-turn flag for STUN-only (works for most NAT types)
+// Note: TURN servers can be configured via:
+// 1. Relay server (centralized): set TURN_URL on the relay worker
+// 2. Environment variables: TURN_URL, TURN_USERNAME, TURN_PASSWORD
+// 3. The --no-turn flag disables TURN entirely
+
+// RelayICEConfig represents ICE server config from the relay
+type RelayICEConfig struct {
+	URLs       []string
+	Username   string
+	Credential string
+}
 
 // TURNConfig holds TURN server credentials
 type TURNConfig struct {
@@ -68,6 +73,31 @@ func ConfigWithTURN(turnServers []TURNConfig) Config {
 func ConfigWithoutTURN() Config {
 	return Config{
 		UseTURN: false,
+	}
+}
+
+// ConfigFromRelayICE creates a Config from relay-fetched ICE servers
+func ConfigFromRelayICE(relayServers []RelayICEConfig) Config {
+	var iceServers []webrtc.ICEServer
+
+	for _, srv := range relayServers {
+		if srv.Username != "" || srv.Credential != "" {
+			iceServers = append(iceServers, webrtc.ICEServer{
+				URLs:           srv.URLs,
+				Username:       srv.Username,
+				Credential:     srv.Credential,
+				CredentialType: webrtc.ICECredentialTypePassword,
+			})
+		} else {
+			iceServers = append(iceServers, webrtc.ICEServer{
+				URLs: srv.URLs,
+			})
+		}
+	}
+
+	return Config{
+		ICEServers: iceServers,
+		UseTURN:    true,
 	}
 }
 

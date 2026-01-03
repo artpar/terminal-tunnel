@@ -122,7 +122,23 @@ func NewServer(opts Options) (*Server, error) {
 	if opts.NoTURN {
 		webrtcConfig = ttwebrtc.ConfigWithoutTURN()
 	} else {
-		webrtcConfig = ttwebrtc.DefaultConfig()
+		// Try to fetch ICE servers from relay (includes TURN if configured)
+		relayURL := signaling.GetRelayURL()
+		if iceResp, err := signaling.FetchICEServers(relayURL); err == nil {
+			// Convert signaling config to webrtc config
+			var relayConfigs []ttwebrtc.RelayICEConfig
+			for _, srv := range iceResp.ICEServers {
+				relayConfigs = append(relayConfigs, ttwebrtc.RelayICEConfig{
+					URLs:       srv.URLs,
+					Username:   srv.Username,
+					Credential: srv.Credential,
+				})
+			}
+			webrtcConfig = ttwebrtc.ConfigFromRelayICE(relayConfigs)
+		} else {
+			// Fall back to default (STUN only with env-based TURN)
+			webrtcConfig = ttwebrtc.DefaultConfig()
+		}
 	}
 
 	server := &Server{
@@ -258,12 +274,44 @@ func (s *Server) Start(ctx ...context.Context) error {
 	// Display TURN configuration status
 	if !s.webrtcConfig.UseTURN {
 		fmt.Printf("⚠ TURN disabled (may fail with symmetric NAT)\n")
-	} else if turnConfig := ttwebrtc.GetTURNFromEnv(); turnConfig != nil {
-		fmt.Printf("✓ TURN relay configured: %s\n", turnConfig.URLs[0])
-	} else if len(s.webrtcConfig.TURNServers) > 0 {
-		fmt.Printf("✓ TURN relay configured (custom servers)\n")
 	} else {
-		fmt.Printf("ℹ STUN-only mode (set TURN_URL for symmetric NAT support)\n")
+		// Check if we have TURN servers from any source
+		hasTurn := false
+		turnSource := ""
+
+		// Check direct ICE servers (from relay fetch)
+		for _, srv := range s.webrtcConfig.ICEServers {
+			for _, url := range srv.URLs {
+				if len(url) > 5 && url[:5] == "turn:" {
+					hasTurn = true
+					turnSource = "relay"
+					break
+				}
+			}
+			if hasTurn {
+				break
+			}
+		}
+
+		// Check env-based TURN
+		if !hasTurn {
+			if turnConfig := ttwebrtc.GetTURNFromEnv(); turnConfig != nil {
+				hasTurn = true
+				turnSource = turnConfig.URLs[0]
+			}
+		}
+
+		// Check custom TURN servers
+		if !hasTurn && len(s.webrtcConfig.TURNServers) > 0 {
+			hasTurn = true
+			turnSource = "custom"
+		}
+
+		if hasTurn {
+			fmt.Printf("✓ TURN relay configured (%s)\n", turnSource)
+		} else {
+			fmt.Printf("ℹ STUN-only mode (configure TURN on relay for symmetric NAT)\n")
+		}
 	}
 
 	isFirstConnection := true

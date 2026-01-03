@@ -114,6 +114,38 @@ const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CODE_LENGTH = 8;
 const EXPIRY_SECONDS = 300; // 5 minutes
 
+// Default STUN servers (free, public)
+const DEFAULT_STUN_SERVERS = [
+  'stun:stun.l.google.com:19302',
+  'stun:stun1.l.google.com:19302',
+  'stun:stun2.l.google.com:19302',
+  'stun:stun3.l.google.com:19302',
+  'stun:stun4.l.google.com:19302'
+];
+
+// Build ICE servers configuration
+function getICEServers(env) {
+  const servers = [
+    { urls: DEFAULT_STUN_SERVERS }
+  ];
+
+  // Add TURN server if configured via environment variables
+  // Set these in wrangler.toml or Cloudflare dashboard:
+  //   TURN_URL = "turn:your-server.com:3478"
+  //   TURN_USERNAME = "your-username"
+  //   TURN_PASSWORD = "your-password"
+  if (env.TURN_URL) {
+    const turnUrls = env.TURN_URL.split(',').map(u => u.trim());
+    servers.push({
+      urls: turnUrls,
+      username: env.TURN_USERNAME || '',
+      credential: env.TURN_PASSWORD || ''
+    });
+  }
+
+  return servers;
+}
+
 function generateCode() {
   let code = '';
   for (let i = 0; i < CODE_LENGTH; i++) {
@@ -182,6 +214,26 @@ export default {
       // Health check
       if (path === '/health') {
         return new Response('OK', { headers: corsHeaders });
+      }
+
+      // ICE servers configuration endpoint
+      // Returns STUN servers + TURN servers (if configured)
+      if (path === '/ice-servers') {
+        const iceServers = getICEServers(env);
+        const hasTurn = iceServers.some(s =>
+          Array.isArray(s.urls)
+            ? s.urls.some(u => u.startsWith('turn:'))
+            : s.urls?.startsWith('turn:')
+        );
+        return new Response(JSON.stringify({
+          iceServers,
+          hasTurn,
+          message: hasTurn
+            ? 'TURN relay configured for symmetric NAT support'
+            : 'STUN-only mode (configure TURN_URL for symmetric NAT)'
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
 
       // POST /session - create new session

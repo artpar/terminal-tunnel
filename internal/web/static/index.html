@@ -441,9 +441,26 @@
         const MSG_DATA = 0x01, MSG_RESIZE = 0x02, MSG_PING = 0x03, MSG_PONG = 0x04, MSG_CLOSE = 0x05;
         const COMPACT_VERSION = 0x01, SALT_SIZE = 16;
 
-        // ICE servers - STUN only (TURN requires user configuration)
-        // Works for most NAT types; symmetric NAT may need TURN
-        function getICEServers() {
+        // ICE servers - fetched from relay (includes TURN if configured)
+        // Falls back to default STUN servers if fetch fails
+        let cachedICEServers = null;
+
+        async function fetchICEServers(relayUrl) {
+            if (cachedICEServers) return cachedICEServers;
+            try {
+                const resp = await fetch(`${relayUrl}/ice-servers`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    cachedICEServers = data.iceServers;
+                    if (data.hasTurn) {
+                        console.log('[ICE] TURN relay available for symmetric NAT');
+                    }
+                    return cachedICEServers;
+                }
+            } catch (e) {
+                console.log('[ICE] Failed to fetch ICE servers, using defaults');
+            }
+            // Fallback to default STUN servers
             return [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
@@ -984,8 +1001,8 @@
         async function establishConnection(session, offerSdp, code) {
             const statusText = session.connectScreen.querySelector('.status-text');
 
-            // Get ICE servers (STUN only - TURN requires explicit config)
-            const iceServers = getICEServers();
+            // Get ICE servers from relay (includes TURN if configured)
+            const iceServers = await fetchICEServers(session.relayUrl);
             session.pc = new RTCPeerConnection({ iceServers });
 
             session.pc.ondatachannel = (event) => {

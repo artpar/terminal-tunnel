@@ -111,3 +111,17 @@ type ViewerSessionResponse struct {
 	ReadOnly bool   `json:"read_only"` // Always true for viewer sessions
 	Used     bool   `json:"used"`      // True if a viewer already connected
 }
+
+// ICEServerConfig represents a single ICE server configuration
+type ICEServerConfig struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+}
+
+// ICEServersResponse is the response from /ice-servers endpoint
+type ICEServersResponse struct {
+	ICEServers []ICEServerConfig `json:"iceServers"`
+	HasTURN    bool              `json:"hasTurn"`
+	Message    string            `json:"message"`
+}

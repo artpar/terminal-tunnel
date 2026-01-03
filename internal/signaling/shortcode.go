@@ -406,3 +406,26 @@ func GetViewerSession(relayURL, code string) (*ViewerSessionResponse, error) {
 
 	return &result, nil
 }
+
+// FetchICEServers fetches ICE server configuration from the relay
+// This allows central configuration of TURN servers
+func FetchICEServers(relayURL string) (*ICEServersResponse, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	resp, err := client.Get(strings.TrimSuffix(relayURL, "/") + "/ice-servers")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch ICE servers: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("relay returned status %d", resp.StatusCode)
+	}
+
+	var result ICEServersResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode ICE servers: %w", err)
+	}
+
+	return &result, nil
+}
