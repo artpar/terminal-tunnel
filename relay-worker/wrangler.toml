@@ -15,9 +15,8 @@ crons = ["0 0 * * *"]
 # [vars]
 # CLIENT_URL = "https://yourusername.github.io/terminal-tunnel"
 
-# TURN server configuration for NAT traversal
-# Uses ephemeral credentials (RFC 5766) for security
-# Set the shared secret via: wrangler secret put TURN_SECRET
-# (must match coturn's static-auth-secret config)
+# TURN server configuration for NAT traversal (hosted on emptychair.dev)
 [vars]
 TURN_URL = "turn:emptychair.dev:3478,turn:emptychair.dev:3478?transport=tcp"
+TURN_USERNAME = "terminaltunnel"
+TURN_PASSWORD = "Tt2024SecurePass!"
