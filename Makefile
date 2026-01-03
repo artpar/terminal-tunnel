@@ -7,7 +7,7 @@ LDFLAGS=-s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)
 BUILD_DIR=build
 DIST_DIR=dist
 
-.PHONY: all build clean test build-all release install packages
+.PHONY: all build clean test test-api build-all release install packages
 
 all: build
 
@@ -18,6 +18,32 @@ build:
 # Run tests
 test:
 	go test -v ./...
+
+# Run API tests with Bruno
+test-api: build
+	@which bru > /dev/null || (echo "Bruno CLI not found. Install: npm install -g @usebruno/cli" && exit 1)
+	@echo "Starting relay server on port 8765..."
+	@./$(BINARY_NAME) relay --port 8765 & echo $$! > .relay.pid
+	@sleep 2
+	@echo ""
+	@if curl -s http://localhost:8765/health > /dev/null 2>&1; then \
+		echo "Relay server is running"; \
+	else \
+		echo "Failed to start relay server"; \
+		kill $$(cat .relay.pid) 2>/dev/null || true; \
+		rm -f .relay.pid; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "Running Bruno API tests..."
+	@echo "========================================"
+	@cd examples/courier-collection && bru run --env Local 2>&1; \
+		TEST_EXIT=$$?; \
+		kill $$(cat ../../.relay.pid) 2>/dev/null || true; \
+		rm -f ../../.relay.pid; \
+		exit $$TEST_EXIT
+	@echo "========================================"
+	@echo "API tests complete"
 
 # Clean build artifacts
 clean:
@@ -146,7 +172,8 @@ help:
 	@echo "  build-all  Build for all platforms (static)"
 	@echo "  release    Create release archives with checksums"
 	@echo "  packages   Build DEB/RPM/APK packages (requires nfpm)"
-	@echo "  test       Run tests"
+	@echo "  test       Run Go tests"
+	@echo "  test-api   Run Bruno API tests (requires: npm i -g @usebruno/cli)"
 	@echo "  install    Install to /usr/local/bin"
 	@echo "  uninstall  Remove from /usr/local/bin"
 	@echo "  clean      Remove build artifacts"
