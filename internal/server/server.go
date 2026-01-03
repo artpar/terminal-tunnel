@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/signal"
@@ -19,6 +21,12 @@ import (
 	ttwebrtc "github.com/artpar/terminal-tunnel/internal/webrtc"
 	"github.com/artpar/terminal-tunnel/internal/web"
 )
+
+// hashSDP returns a short hash of an SDP for comparison
+func hashSDP(sdp string) string {
+	h := sha256.Sum256([]byte(sdp))
+	return hex.EncodeToString(h[:8])
+}
 
 // Options configures the terminal tunnel server
 type Options struct {
@@ -552,10 +560,54 @@ func (s *Server) Start(ctx ...context.Context) error {
 			}
 		}
 
+		// Start watching for new answers during ICE connection phase
+		// This handles the case where client times out and posts a new answer
+		newAnswerDuringICE := make(chan struct{}, 1)
+		stopICEAnswerWatch := make(chan struct{})
+		currentAnswerHash := hashSDP(answer)
+		if s.shortCodeClient != nil {
+			go func() {
+				for {
+					select {
+					case <-stopICEAnswerWatch:
+						return
+					default:
+					}
+					ctx, cancel := context.WithTimeout(s.ctx, 2*time.Second)
+					newAns, err := s.shortCodeClient.WaitForAnswerWithContext(ctx)
+					cancel()
+					if err == nil && newAns != "" && hashSDP(newAns) != currentAnswerHash {
+						select {
+						case newAnswerDuringICE <- struct{}{}:
+						default:
+						}
+						return
+					}
+					select {
+					case <-stopICEAnswerWatch:
+						return
+					case <-time.After(500 * time.Millisecond):
+					}
+				}
+			}()
+		}
+
 		select {
 		case <-dcOpen:
+			close(stopICEAnswerWatch)
 			s.log("✓ Data channel connected\n")
+		case <-newAnswerDuringICE:
+			close(stopICEAnswerWatch)
+			peer.Close()
+			s.peer = nil
+			s.log("  [ICE] Client reconnected with new credentials, restarting...\n")
+			// Mark first connection done so we use the existing session code
+			if isFirstConnection && s.shortCodeClient != nil {
+				isFirstConnection = false
+			}
+			continue // Restart the connection loop with new offer/answer
 		case <-time.After(30 * time.Second):
+			close(stopICEAnswerWatch)
 			peer.Close()
 			s.log("⚠ Connection timeout, waiting for new client...\n")
 			// Mark first connection done so we don't create new session code on retry
@@ -565,6 +617,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 			}
 			continue
 		case <-s.ctx.Done():
+			close(stopICEAnswerWatch)
 			return s.Stop()
 		}
 

@@ -1124,7 +1124,7 @@
                     session.status = 'disconnected';
                     attemptAutoReconnect(session);
                 }
-            }, 10000); // 10 second backup timeout (ICE stall should trigger at 5s)
+            }, 30000); // 30 second backup timeout to allow TURN relay time on mobile networks
         }
 
         function setupDataChannel(session) {
