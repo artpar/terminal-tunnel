@@ -48,7 +48,7 @@ func TestConnectionReliability(t *testing.T) {
 	var hostDisconnected, clientDisconnected atomic.Int32
 
 	hostPeer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		t.Logf("[Host] Connection state: %s", state)
+		// Don't use t.Logf here - callback may fire after test completes
 		switch state {
 		case webrtc.PeerConnectionStateConnected:
 			hostConnected.Store(true)
@@ -58,7 +58,7 @@ func TestConnectionReliability(t *testing.T) {
 	})
 
 	clientPeer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		t.Logf("[Client] Connection state: %s", state)
+		// Don't use t.Logf here - callback may fire after test completes
 		switch state {
 		case webrtc.PeerConnectionStateConnected:
 			clientConnected.Store(true)
