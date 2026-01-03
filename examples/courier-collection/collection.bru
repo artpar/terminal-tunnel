@@ -32,8 +32,7 @@ script:pre-request {
   // Collection-level pre-request script
   // Runs before every request in the collection
 
-  const timestamp = Date.now();
-  bru.setVar("requestTimestamp", timestamp);
+  bru.setVar("collectionRequestStart", Date.now());
 
   console.log(`[${new Date().toISOString()}] Starting request: ${req.getName()}`);
 }
@@ -42,12 +41,12 @@ script:post-response {
   // Collection-level post-response script
   // Runs after every request in the collection
 
-  const startTime = bru.getVar("requestTimestamp");
-  const duration = Date.now() - startTime;
+  const collectionStart = bru.getVar("collectionRequestStart");
+  const elapsed = Date.now() - collectionStart;
 
-  console.log(`[${new Date().toISOString()}] Completed in ${duration}ms - Status: ${res.getStatus()}`);
+  console.log(`[${new Date().toISOString()}] Completed in ${elapsed}ms - Status: ${res.getStatus()}`);
 
   // Store response time for later analysis
-  bru.setVar("lastResponseTime", duration);
+  bru.setVar("lastResponseTime", elapsed);
   bru.setVar("lastStatusCode", res.getStatus());
 }

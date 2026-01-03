@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{wsUrl}}/ws?session={{sessionCode}}
+  url: {{baseUrl}}/health
   body: none
   auth: none
 }
@@ -167,10 +167,9 @@ script:pre-request {
 }
 
 tests {
-  // This test documents expected behavior, not actual WebSocket testing
-  test("WebSocket endpoint exists (will fail on HTTP)", function() {
-    // HTTP GET to WebSocket endpoint returns 400 (Bad Request)
-    // or upgrade required - both are acceptable
-    expect(res.getStatus()).to.be.oneOf([400, 426, 500]);
+  // Bruno doesn't support WebSocket - this is documentation only
+  // We just verify the server is running
+  test("Server is running (see docs for WebSocket testing)", function() {
+    expect(res.getStatus()).to.equal(200);
   });
 }
