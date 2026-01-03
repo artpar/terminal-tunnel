@@ -480,6 +480,11 @@ func (s *Server) Start(ctx ...context.Context) error {
 		case <-time.After(30 * time.Second):
 			peer.Close()
 			fmt.Printf("⚠ Connection timeout, waiting for new client...\n")
+			// Mark first connection done so we don't create new session code on retry
+			// The session already exists on relay, we just need to update the offer
+			if isFirstConnection && s.shortCodeClient != nil {
+				isFirstConnection = false
+			}
 			continue
 		case <-s.ctx.Done():
 			return s.Stop()

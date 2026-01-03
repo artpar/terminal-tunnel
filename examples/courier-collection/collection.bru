@@ -1,0 +1,53 @@
+meta {
+  name: Terminal Tunnel API
+}
+
+docs {
+  # Terminal Tunnel API Collection
+
+  This collection demonstrates all Bruno/Courier features:
+  - Pre-request scripts (preflight)
+  - Post-request scripts (postflight)
+  - Tests with assertions
+  - Variables and environments
+  - Request chaining
+  - WebSocket documentation
+
+  ## Getting Started
+
+  1. Start the local relay server: `tt relay --port 8765`
+  2. Select the "Local" environment
+  3. Run requests in order from the Session folder
+
+  ## API Flow
+
+  1. POST /session - Create session, get code
+  2. GET /session/{code} - Retrieve session SDP
+  3. POST /session/{code}/answer - Submit answer
+  4. GET /session/{code}/answer - Poll for answer
+  5. PATCH /session/{code} - Heartbeat
+}
+
+script:pre-request {
+  // Collection-level pre-request script
+  // Runs before every request in the collection
+
+  const timestamp = Date.now();
+  bru.setVar("requestTimestamp", timestamp);
+
+  console.log(`[${new Date().toISOString()}] Starting request: ${req.getName()}`);
+}
+
+script:post-response {
+  // Collection-level post-response script
+  // Runs after every request in the collection
+
+  const startTime = bru.getVar("requestTimestamp");
+  const duration = Date.now() - startTime;
+
+  console.log(`[${new Date().toISOString()}] Completed in ${duration}ms - Status: ${res.getStatus()}`);
+
+  // Store response time for later analysis
+  bru.setVar("lastResponseTime", duration);
+  bru.setVar("lastStatusCode", res.getStatus());
+}

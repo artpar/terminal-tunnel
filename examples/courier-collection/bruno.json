@@ -1,0 +1,16 @@
+{
+  "version": "1",
+  "name": "Terminal Tunnel API",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ],
+  "scripts": {
+    "moduleWhitelist": ["crypto", "buffer"],
+    "filesystemAccess": {
+      "allow": false
+    }
+  },
+  "docs": "Complete API collection for Terminal Tunnel relay server demonstrating all Bruno features including tests, pre-request scripts, post-request scripts, environments, and variables."
+}
