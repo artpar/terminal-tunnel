@@ -123,23 +123,52 @@ const DEFAULT_STUN_SERVERS = [
   'stun:stun4.l.google.com:19302'
 ];
 
+// TURN credential TTL (1 hour)
+const TURN_CREDENTIAL_TTL = 3600;
+
+// Generate ephemeral TURN credentials using TURN REST API (RFC 5766)
+// Username format: timestamp:username
+// Credential: Base64(HMAC-SHA1(username, secret))
+async function generateTURNCredentials(secret, username = 'terminaltunnel') {
+  const expiry = Math.floor(Date.now() / 1000) + TURN_CREDENTIAL_TTL;
+  const turnUsername = `${expiry}:${username}`;
+
+  // Generate HMAC-SHA1 credential
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+  const messageData = encoder.encode(turnUsername);
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign']
+  );
+
+  const signature = await crypto.subtle.sign('HMAC', key, messageData);
+  const credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
+
+  return { username: turnUsername, credential, ttl: TURN_CREDENTIAL_TTL };
+}
+
 // Build ICE servers configuration
-function getICEServers(env) {
+async function getICEServers(env) {
   const servers = [
     { urls: DEFAULT_STUN_SERVERS }
   ];
 
-  // Add TURN server if configured via environment variables
-  // Set these in wrangler.toml or Cloudflare dashboard:
+  // Add TURN server with ephemeral credentials if configured
+  // Set these via `wrangler secret put TURN_SECRET`:
   //   TURN_URL = "turn:your-server.com:3478"
-  //   TURN_USERNAME = "your-username"
-  //   TURN_PASSWORD = "your-password"
-  if (env.TURN_URL) {
+  //   TURN_SECRET = "your-shared-secret" (must match coturn static-auth-secret)
+  if (env.TURN_URL && env.TURN_SECRET) {
     const turnUrls = env.TURN_URL.split(',').map(u => u.trim());
+    const creds = await generateTURNCredentials(env.TURN_SECRET);
     servers.push({
       urls: turnUrls,
-      username: env.TURN_USERNAME || '',
-      credential: env.TURN_PASSWORD || ''
+      username: creds.username,
+      credential: creds.credential
     });
   }
 
@@ -219,7 +248,7 @@ export default {
       // ICE servers configuration endpoint
       // Returns STUN servers + TURN servers (if configured)
       if (path === '/ice-servers') {
-        const iceServers = getICEServers(env);
+        const iceServers = await getICEServers(env);
         const hasTurn = iceServers.some(s =>
           Array.isArray(s.urls)
             ? s.urls.some(u => u.startsWith('turn:'))
@@ -228,6 +257,7 @@ export default {
         return new Response(JSON.stringify({
           iceServers,
           hasTurn,
+          credentialTtl: hasTurn ? TURN_CREDENTIAL_TTL : null,
           message: hasTurn
             ? 'TURN relay configured for symmetric NAT support'
             : 'STUN-only mode (configure TURN_URL for symmetric NAT)'

@@ -200,7 +200,7 @@ func (b *Bridge) Pause() {
 	defer b.mu.Unlock()
 	b.paused = true
 	b.viewerSends = nil // Clear viewer sends when pausing
-	fmt.Printf("  [Debug] Bridge paused, buffering output (max %d bytes)\n", b.bufferMax)
+	// Debug: Bridge paused
 }
 
 // Resume switches back to sending mode and flushes buffered output
@@ -211,10 +211,10 @@ func (b *Bridge) Resume(send func([]byte) error) int {
 
 	bufferedBytes := len(b.buffer)
 	if bufferedBytes > 0 {
-		fmt.Printf("  [Debug] Bridge resuming, flushing %d buffered bytes\n", bufferedBytes)
+		// Debug: Bridge resuming
 		// Send buffered data to new client
 		if err := send(b.buffer); err != nil {
-			fmt.Printf("  [Debug] Error flushing buffer: %v\n", err)
+			// Error flushing buffer - ignored
 		}
 		b.buffer = nil // Clear buffer
 	}
@@ -239,7 +239,7 @@ func (b *Bridge) AddViewerSend(send func([]byte) error) {
 
 	// Send history buffer to new viewer for late-join replay
 	if len(b.historyBuffer) > 0 {
-		fmt.Printf("  [Debug] Sending %d bytes of history to new viewer\n", len(b.historyBuffer))
+		// Debug: Sending history to new viewer
 		// Make a copy to avoid race conditions
 		history := make([]byte, len(b.historyBuffer))
 		copy(history, b.historyBuffer)
@@ -344,7 +344,7 @@ func (b *Bridge) readLoop() {
 
 			// Send to primary (control) channel
 			if err := b.send(data); err != nil {
-				fmt.Printf("  [Debug] Bridge send error: %v\n", err)
+				// Debug: Bridge send error
 				b.mu.Unlock()
 				b.Close()
 				return

@@ -100,6 +100,21 @@ type Server struct {
 	// Answer watcher for detecting client reconnection
 	newAnswer     chan string
 	answerWatcher chan struct{}
+
+	// Quiet mode - suppress output after initial display to avoid terminal corruption
+	quiet bool
+}
+
+// log prints a message only if not in quiet mode
+func (s *Server) log(format string, args ...interface{}) {
+	if !s.quiet {
+		fmt.Printf(format, args...)
+	}
+}
+
+// SetQuiet enables or disables quiet mode (suppresses output after initial display)
+func (s *Server) SetQuiet(quiet bool) {
+	s.quiet = quiet
 }
 
 // NewServer creates a new terminal tunnel server
@@ -215,10 +230,10 @@ func (s *Server) StartPTYEarly() (*Bridge, error) {
 		}
 		rec, err := recording.NewRecorder(recordPath, 80, 24, "Terminal Tunnel Session")
 		if err != nil {
-			fmt.Printf("⚠ Failed to start recording: %v\n", err)
+			s.log("⚠ Failed to start recording: %v\n", err)
 		} else {
 			s.recorder = rec
-			fmt.Printf("✓ Recording to: %s\n", recordPath)
+			s.log("✓ Recording to: %s\n", recordPath)
 		}
 	}
 
@@ -262,7 +277,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 		// Cancel context on signal (allows blocking operations to exit)
 		go func() {
 			<-sigChan
-			fmt.Printf("\n\nShutting down...\n")
+			s.log("\n\nShutting down...\n")
 			s.cancel()
 		}()
 	}
@@ -330,7 +345,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 		if useStandby {
 			// Use standby peer - relay already has the correct offer!
 			// This eliminates the race condition where client gets stale offer
-			fmt.Printf("\n  Using standby peer for instant reconnection (code: %s)\n\n", s.shortCodeClient.GetCode())
+			s.log("\n  Using standby peer for instant reconnection (code: %s)\n\n", s.shortCodeClient.GetCode())
 
 			peer = s.standbyPeer
 			dc = s.standbyDc
@@ -341,12 +356,12 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 			// Set up connection state monitoring on the standby peer
 			peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-				fmt.Printf("  [WebRTC] Connection state: %s\n", state.String())
+				s.log("  [WebRTC] Connection state: %s\n", state.String())
 				switch state {
 				case webrtc.PeerConnectionStateDisconnected:
-					fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
+					s.log("\n⚠ WebRTC connection disconnected (may recover)\n")
 				case webrtc.PeerConnectionStateFailed:
-					fmt.Printf("\n✗ WebRTC connection failed\n")
+					s.log("\n✗ WebRTC connection failed\n")
 					select {
 					case s.disconnected <- true:
 					default:
@@ -355,12 +370,12 @@ func (s *Server) Start(ctx ...context.Context) error {
 			})
 
 			peer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-				fmt.Printf("  [ICE] Connection state: %s\n", state.String())
+				s.log("  [ICE] Connection state: %s\n", state.String())
 				switch state {
 				case webrtc.ICEConnectionStateDisconnected:
-					fmt.Printf("\n⚠ ICE disconnected (checking connectivity...)\n")
+					s.log("\n⚠ ICE disconnected (checking connectivity...)\n")
 				case webrtc.ICEConnectionStateFailed:
-					fmt.Printf("\n✗ ICE failed - NAT/firewall may be blocking UDP\n")
+					s.log("\n✗ ICE failed - NAT/firewall may be blocking UDP\n")
 				}
 			})
 
@@ -378,7 +393,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 				if s.ctx.Err() != nil {
 					return s.Stop()
 				}
-				fmt.Printf("⚠ Standby reconnection failed: %v, creating new peer\n", err)
+				s.log("⚠ Standby reconnection failed: %v, creating new peer\n", err)
 				peer.Close()
 				s.peer = nil
 				standbyFailed = true
@@ -395,15 +410,15 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 			// Monitor connection state for debugging and early disconnect detection
 			peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-				fmt.Printf("  [WebRTC] Connection state: %s\n", state.String())
+				s.log("  [WebRTC] Connection state: %s\n", state.String())
 				switch state {
 				case webrtc.PeerConnectionStateConnected:
 					// Connection established
 				case webrtc.PeerConnectionStateDisconnected:
 					// Note: "disconnected" can recover - don't trigger reconnect yet
-					fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
+					s.log("\n⚠ WebRTC connection disconnected (may recover)\n")
 				case webrtc.PeerConnectionStateFailed:
-					fmt.Printf("\n✗ WebRTC connection failed\n")
+					s.log("\n✗ WebRTC connection failed\n")
 					select {
 					case s.disconnected <- true:
 					default:
@@ -415,14 +430,14 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 			// Monitor ICE connection state for debugging
 			peer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-				fmt.Printf("  [ICE] Connection state: %s\n", state.String())
+				s.log("  [ICE] Connection state: %s\n", state.String())
 				switch state {
 				case webrtc.ICEConnectionStateDisconnected:
-					fmt.Printf("\n⚠ ICE disconnected (checking connectivity...)\n")
+					s.log("\n⚠ ICE disconnected (checking connectivity...)\n")
 				case webrtc.ICEConnectionStateFailed:
-					fmt.Printf("\n✗ ICE failed - NAT/firewall may be blocking UDP\n")
+					s.log("\n✗ ICE failed - NAT/firewall may be blocking UDP\n")
 				case webrtc.ICEConnectionStateClosed:
-					fmt.Printf("\n⚠ ICE connection closed\n")
+					s.log("\n⚠ ICE connection closed\n")
 				}
 			})
 
@@ -442,7 +457,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 			if isFirstConnection {
 				publicIP := peer.GetPublicIP()
 				if publicIP != "" {
-					fmt.Printf("✓ Public IP discovered via STUN: %s\n", publicIP)
+					s.log("✓ Public IP discovered via STUN: %s\n", publicIP)
 				}
 			}
 
@@ -461,10 +476,10 @@ func (s *Server) Start(ctx ...context.Context) error {
 			} else {
 				// Reconnection without standby - update session with new offer
 				if sigMethod == signaling.MethodShortCode && s.shortCodeClient != nil {
-					fmt.Printf("\n  Waiting for reconnection... (same code: %s)\n\n", s.shortCodeClient.GetCode())
+					s.log("\n  Waiting for reconnection... (same code: %s)\n\n", s.shortCodeClient.GetCode())
 					err = s.shortCodeClient.UpdateSession(offer, saltB64)
 					if err != nil {
-						fmt.Printf("⚠ Failed to update session: %v\n", err)
+						s.log("⚠ Failed to update session: %v\n", err)
 						return err
 					}
 					// Use context for cancellation support
@@ -501,7 +516,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 			}
 		}
 
-		fmt.Printf("✓ Received client answer\n")
+		s.log("✓ Received client answer\n")
 
 		// Set up data channel open handler BEFORE setting remote description
 		// to avoid race condition where channel opens before handler is set
@@ -528,10 +543,10 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 		select {
 		case <-dcOpen:
-			fmt.Printf("✓ Data channel connected\n")
+			s.log("✓ Data channel connected\n")
 		case <-time.After(30 * time.Second):
 			peer.Close()
-			fmt.Printf("⚠ Connection timeout, waiting for new client...\n")
+			s.log("⚠ Connection timeout, waiting for new client...\n")
 			// Mark first connection done so we don't create new session code on retry
 			// The session already exists on relay, we just need to update the offer
 			if isFirstConnection && s.shortCodeClient != nil {
@@ -574,21 +589,21 @@ func (s *Server) Start(ctx ...context.Context) error {
 				}
 				rec, err := recording.NewRecorder(recordPath, 80, 24, "Terminal Tunnel Session")
 				if err != nil {
-					fmt.Printf("⚠ Failed to start recording: %v\n", err)
+					s.log("⚠ Failed to start recording: %v\n", err)
 				} else {
 					s.recorder = rec
-					fmt.Printf("✓ Recording to: %s\n", recordPath)
+					s.log("✓ Recording to: %s\n", recordPath)
 				}
 			}
 		}
 
-		fmt.Printf("✓ Terminal session active\n")
+		s.log("✓ Terminal session active\n")
 
 		// Invoke client connect callback
 		if s.callbacks.OnClientConnect != nil {
 			s.callbacks.OnClientConnect()
 		}
-		fmt.Printf("\n")
+		s.log("\n")
 
 		// Create encrypted channel with PBKDF2 fallback for CSP-restricted browsers
 		channel := ttwebrtc.NewEncryptedChannel(dc, &s.key)
@@ -602,14 +617,14 @@ func (s *Server) Start(ctx ...context.Context) error {
 			bridge = s.bridge
 			bufferedBytes := bridge.Resume(channel.SendData)
 			if bufferedBytes > 0 {
-				fmt.Printf("  [Debug] Replayed %d bytes of buffered output\n", bufferedBytes)
+				s.log("  [Debug] Replayed %d bytes of buffered output\n", bufferedBytes)
 			}
 		} else if s.bridge != nil {
 			// Bridge already running (started early) - attach WebRTC sender
 			bridge = s.bridge
 			bufferedBytes := bridge.AttachSender(channel.SendData)
 			if bufferedBytes > 0 {
-				fmt.Printf("  [Debug] Client joined session, replayed %d bytes of history\n", bufferedBytes)
+				s.log("  [Debug] Client joined session, replayed %d bytes of history\n", bufferedBytes)
 			}
 		} else {
 			// Create new bridge
@@ -638,11 +653,11 @@ func (s *Server) Start(ctx ...context.Context) error {
 		})
 
 		channel.OnClose(func() {
-			fmt.Printf("\n✓ Client disconnected (data channel closed)\n")
+			s.log("\n✓ Client disconnected (data channel closed)\n")
 			if s.peer != nil {
-				fmt.Printf("  [Debug] Peer connection state: %s\n", s.peer.ConnectionState().String())
+				s.log("  [Debug] Peer connection state: %s\n", s.peer.ConnectionState().String())
 			}
-			fmt.Printf("  [Debug] Channel useAltKey: %v\n", channel.UseAltKey())
+			s.log("  [Debug] Channel useAltKey: %v\n", channel.UseAltKey())
 			// Invoke disconnect callback
 			if s.callbacks.OnClientDisconnect != nil {
 				s.callbacks.OnClientDisconnect()
@@ -650,7 +665,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 			select {
 			case s.disconnected <- true:
 			default:
-				fmt.Printf("  [Debug] disconnected channel was full/blocked\n")
+				s.log("  [Debug] disconnected channel was full/blocked\n")
 			}
 		})
 
@@ -659,9 +674,9 @@ func (s *Server) Start(ctx ...context.Context) error {
 		time.Sleep(100 * time.Millisecond)
 
 		// Start bridge (PTY -> channel)
-		fmt.Printf("  [Debug] Starting bridge\n")
+		s.log("  [Debug] Starting bridge\n")
 		bridge.Start()
-		fmt.Printf("  [Debug] Bridge started, starting keepalive\n")
+		s.log("  [Debug] Bridge started, starting keepalive\n")
 
 		// Start keepalive monitoring (server sends pings, expects pongs)
 		keepaliveTimeout := channel.StartKeepalive()
@@ -676,7 +691,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 		// Create standby peer for instant reconnection (key to eliminating race conditions)
 		// The relay is updated with the standby offer, so clients always get fresh offers
 		if err := s.createStandbyPeer(); err != nil {
-			fmt.Printf("  [Debug] Standby peer creation failed: %v (reconnects may be slower)\n", err)
+			s.log("  [Debug] Standby peer creation failed: %v (reconnects may be slower)\n", err)
 		}
 
 		// Start answer watcher to detect client reconnection (fast reconnect)
@@ -699,7 +714,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 			continue
 		case <-keepaliveTimeout:
 			// Keepalive timed out - no pong received within timeout
-			fmt.Printf("\n⚠ Connection timed out (no response from client)\n")
+			s.log("\n⚠ Connection timed out (no response from client)\n")
 			s.stopAnswerWatcher()
 			s.cleanupConnection()
 			// Drain any stale disconnected signals
@@ -713,7 +728,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 			// New answer received while connected - client is reconnecting (e.g., page refresh)
 			// With standby peer pattern, this answer IS for the standby offer!
 			// Use it directly for instant reconnection.
-			fmt.Printf("\n✓ Client reconnection detected (instant reconnect with standby peer)\n")
+			s.log("\n✓ Client reconnection detected (instant reconnect with standby peer)\n")
 			s.stopAnswerWatcher()
 
 			// Check if we have a standby peer ready
@@ -730,19 +745,19 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 				// Set remote description on standby peer
 				if err := standbyPeer.SetRemoteDescription(webrtc.SDPTypeAnswer, receivedAnswer); err != nil {
-					fmt.Printf("⚠ Failed to set answer on standby peer: %v\n", err)
+					s.log("⚠ Failed to set answer on standby peer: %v\n", err)
 					standbyPeer.Close()
 					continue
 				}
 
 				// Set up connection state monitoring
 				standbyPeer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-					fmt.Printf("  [WebRTC] Connection state: %s\n", state.String())
+					s.log("  [WebRTC] Connection state: %s\n", state.String())
 					switch state {
 					case webrtc.PeerConnectionStateDisconnected:
-						fmt.Printf("\n⚠ WebRTC connection disconnected (may recover)\n")
+						s.log("\n⚠ WebRTC connection disconnected (may recover)\n")
 					case webrtc.PeerConnectionStateFailed:
-						fmt.Printf("\n✗ WebRTC connection failed\n")
+						s.log("\n✗ WebRTC connection failed\n")
 						select {
 						case s.disconnected <- true:
 						default:
@@ -751,7 +766,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 				})
 
 				standbyPeer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-					fmt.Printf("  [ICE] Connection state: %s\n", state.String())
+					s.log("  [ICE] Connection state: %s\n", state.String())
 				})
 
 				// Wait for data channel to open
@@ -762,10 +777,10 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 				select {
 				case <-dcOpen:
-					fmt.Printf("✓ Data channel connected (instant reconnect)\n")
+					s.log("✓ Data channel connected (instant reconnect)\n")
 				case <-time.After(10 * time.Second):
 					standbyPeer.Close()
-					fmt.Printf("⚠ Standby connection timeout\n")
+					s.log("⚠ Standby connection timeout\n")
 					continue
 				case <-s.ctx.Done():
 					return s.Stop()
@@ -793,7 +808,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 				if s.bridge != nil && s.bridge.IsPaused() {
 					bufferedBytes := s.bridge.Resume(channel.SendData)
 					if bufferedBytes > 0 {
-						fmt.Printf("  [Debug] Replayed %d bytes of buffered output\n", bufferedBytes)
+						s.log("  [Debug] Replayed %d bytes of buffered output\n", bufferedBytes)
 					}
 				}
 
@@ -807,7 +822,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 				})
 
 				channel.OnClose(func() {
-					fmt.Printf("\n✓ Client disconnected (data channel closed)\n")
+					s.log("\n✓ Client disconnected (data channel closed)\n")
 					if s.callbacks.OnClientDisconnect != nil {
 						s.callbacks.OnClientDisconnect()
 					}
@@ -827,7 +842,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 
 				// Create new standby peer for next reconnection
 				if err := s.createStandbyPeer(); err != nil {
-					fmt.Printf("  [Debug] Standby peer creation failed: %v\n", err)
+					s.log("  [Debug] Standby peer creation failed: %v\n", err)
 				}
 
 				// Start answer watcher again
@@ -855,7 +870,7 @@ func (s *Server) Start(ctx ...context.Context) error {
 // cleanupConnection cleans up the current connection for reconnection
 // PTY and Bridge are kept running to buffer output for client reconnection
 func (s *Server) cleanupConnection() {
-	fmt.Printf("  [Debug] cleanupConnection starting\n")
+	s.log("  [Debug] cleanupConnection starting\n")
 	if s.bridge != nil {
 		s.bridge.ClearViewerSends() // Clear viewer sends
 		s.bridge.Pause()            // Switch to buffering mode (keeps reading from PTY)
@@ -878,7 +893,7 @@ func (s *Server) cleanupConnection() {
 		s.viewerPeer.Close()
 		s.viewerPeer = nil
 	}
-	fmt.Printf("  [Debug] cleanupConnection complete\n")
+	s.log("  [Debug] cleanupConnection complete\n")
 }
 
 // createStandbyPeer creates a standby peer for instant reconnection
@@ -927,7 +942,7 @@ func (s *Server) createStandbyPeer() error {
 	saltB64 := base64.StdEncoding.EncodeToString(s.salt)
 	if err := s.shortCodeClient.UpdateSession(offer, saltB64); err != nil {
 		// Don't fail - just log and continue without standby
-		fmt.Printf("  [Debug] Failed to update relay with standby offer: %v\n", err)
+		s.log("  [Debug] Failed to update relay with standby offer: %v\n", err)
 		s.standbyPeer.Close()
 		s.standbyPeer = nil
 		s.standbyDc = nil
@@ -935,7 +950,7 @@ func (s *Server) createStandbyPeer() error {
 		return err
 	}
 
-	fmt.Printf("  [Debug] Standby peer created and relay updated\n")
+	s.log("  [Debug] Standby peer created and relay updated\n")
 	return nil
 }
 
@@ -952,7 +967,7 @@ func (s *Server) promoteStandbyPeer() bool {
 	s.standbyDc = nil
 	s.standbyOffer = ""
 
-	fmt.Printf("  [Debug] Standby peer promoted to active\n")
+	s.log("  [Debug] Standby peer promoted to active\n")
 	return true
 }
 
@@ -996,7 +1011,7 @@ func (s *Server) Stop() error {
 		path := s.recorder.Path()
 		duration := s.recorder.Duration()
 		_ = s.recorder.Close()
-		fmt.Printf("✓ Recording saved: %s (duration: %v)\n", path, duration.Round(time.Second))
+		s.log("✓ Recording saved: %s (duration: %v)\n", path, duration.Round(time.Second))
 	}
 	return nil
 }
@@ -1022,7 +1037,7 @@ func (s *Server) startRelayHeartbeat() {
 			case <-ticker.C:
 				if err := s.shortCodeClient.SendHeartbeat(); err != nil {
 					// Log but don't fail - session might still work
-					fmt.Printf("⚠ Relay heartbeat failed: %v\n", err)
+					s.log("⚠ Relay heartbeat failed: %v\n", err)
 				}
 			}
 		}
@@ -1083,7 +1098,7 @@ func (s *Server) startAnswerWatcher() {
 			}
 
 			// New answer received - signal for immediate reconnection
-			fmt.Printf("\n✓ Client reconnection detected (new answer received)\n")
+			s.log("\n✓ Client reconnection detected (new answer received)\n")
 			select {
 			case s.newAnswer <- answer:
 			default:
@@ -1315,7 +1330,7 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 
 		// Set up viewer data channel handler (output only, no input)
 		viewerDC.OnOpen(func() {
-			fmt.Printf("✓ Viewer connected\n")
+			s.log("✓ Viewer connected\n")
 			if s.callbacks.OnViewerConnect != nil {
 				s.callbacks.OnViewerConnect()
 			}
@@ -1331,7 +1346,7 @@ func (s *Server) startShortCodeSignaling(offer, saltB64 string) (string, error) 
 
 			// Handle viewer disconnect (no input handling for viewers)
 			viewerChannel.OnClose(func() {
-				fmt.Printf("✓ Viewer disconnected\n")
+				s.log("✓ Viewer disconnected\n")
 				if s.callbacks.OnViewerDisconnect != nil {
 					s.callbacks.OnViewerDisconnect()
 				}
@@ -1428,16 +1443,16 @@ func (s *Server) waitForViewerConnection() {
 	answer, err := s.shortCodeClient.WaitForViewerAnswerWithContext(s.ctx)
 	if err != nil {
 		if s.ctx.Err() == nil {
-			fmt.Printf("⚠ Viewer connection failed: %v\n", err)
+			s.log("⚠ Viewer connection failed: %v\n", err)
 		}
 		return
 	}
 
 	// Set remote description
 	if err := s.viewerPeer.SetRemoteDescription(webrtc.SDPTypeAnswer, answer); err != nil {
-		fmt.Printf("⚠ Failed to set viewer answer: %v\n", err)
+		s.log("⚠ Failed to set viewer answer: %v\n", err)
 		return
 	}
 
-	fmt.Printf("✓ Viewer answer received\n")
+	s.log("✓ Viewer answer received\n")
 }

@@ -1,7 +1,6 @@
 package webrtc
 
 import (
-	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -155,7 +154,7 @@ func (ec *EncryptedChannel) sendMessage(msg *protocol.Message) error {
 	}
 
 	if err := ec.dc.Send(encrypted); err != nil {
-		fmt.Printf("  [Debug] DC send error: %v, readyState: %v\n", err, ec.dc.ReadyState())
+		// Debug: DC send error
 		return err
 	}
 	return nil
