@@ -193,6 +193,26 @@ func NewBridge(pty *PTY, send func([]byte) error) *Bridge {
 	}
 }
 
+// AttachSender attaches or updates the primary send function
+// This is used to connect WebRTC channel after PTY is already running
+func (b *Bridge) AttachSender(send func([]byte) error) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Send history buffer to new client for late-join replay
+	bufferedBytes := len(b.historyBuffer)
+	if bufferedBytes > 0 && send != nil {
+		// Debug: Sending history to new client
+		history := make([]byte, len(b.historyBuffer))
+		copy(history, b.historyBuffer)
+		go send(history) // Non-blocking send
+	}
+
+	b.send = send
+	b.paused = false
+	return bufferedBytes
+}
+
 // Pause switches the bridge to buffering mode
 // Output is stored in a ring buffer instead of being sent
 func (b *Bridge) Pause() {
