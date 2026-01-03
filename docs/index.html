@@ -171,75 +171,225 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            padding: 20px;
+            padding: 24px;
+            background: linear-gradient(135deg, #0a0f1a 0%, #1a1f2e 100%);
+            overflow-y: auto;
         }
         .connect-screen.active { display: flex; }
 
-        .logo { font-size: 48px; margin-bottom: 10px; }
-        h1 { color: #e94560; margin-bottom: 20px; font-size: 24px; }
-        .status { color: #888; margin-bottom: 20px; font-size: 14px; text-align: center; }
-        .error { color: #ff6b6b; }
-        .success { color: #4ecdc4; }
+        .connect-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .connect-header .logo {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+            font-size: 28px;
+            box-shadow: 0 8px 32px rgba(233, 69, 96, 0.3);
+        }
+        .connect-header h1 {
+            color: #fff;
+            font-size: 22px;
+            font-weight: 600;
+            margin: 0 0 8px 0;
+            letter-spacing: -0.5px;
+        }
+        .connect-header .tagline {
+            color: #6b7280;
+            font-size: 14px;
+            margin: 0;
+        }
+
+        .status-text {
+            color: #9ca3af;
+            font-size: 14px;
+            text-align: center;
+            margin-bottom: 24px;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+        .status-text.error { color: #f87171; background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.2); }
+        .status-text.success { color: #4ade80; background: rgba(74,222,128,0.1); border-color: rgba(74,222,128,0.2); }
 
         .form-container {
-            background: #16213e; padding: 30px; border-radius: 12px;
-            width: 100%; max-width: 400px;
+            background: rgba(255,255,255,0.03);
+            padding: 24px;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 360px;
+            border: 1px solid rgba(255,255,255,0.06);
+            backdrop-filter: blur(10px);
         }
-        .form-container label { color: #888; display: block; margin-bottom: 8px; font-size: 14px; }
-        .form-container input, .form-container textarea, .form-container select {
-            width: 100%; padding: 12px; border: none; border-radius: 8px;
-            background: #0f3460; color: #fff; font-size: 16px;
-            margin-bottom: 15px; font-family: monospace;
+
+        .form-group {
+            margin-bottom: 20px;
         }
-        .form-container input.code-input {
-            font-size: 24px; text-align: center; letter-spacing: 4px;
+        .form-group:last-of-type {
+            margin-bottom: 24px;
+        }
+        .form-group label {
+            color: #9ca3af;
+            display: block;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 500;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
-        .form-container input:focus, .form-container textarea:focus, .form-container select:focus {
-            outline: 2px solid #e94560;
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            font-size: 15px;
+            font-family: inherit;
+            transition: all 0.2s ease;
         }
+        .form-group input::placeholder {
+            color: #4b5563;
+        }
+        .form-group input:hover {
+            border-color: rgba(255,255,255,0.2);
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #e94560;
+            box-shadow: 0 0 0 3px rgba(233,69,96,0.15);
+        }
+        .form-group input.code-input {
+            font-size: 22px;
+            text-align: center;
+            letter-spacing: 6px;
+            text-transform: uppercase;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            padding: 16px;
+        }
+        .form-group input.code-input::placeholder {
+            letter-spacing: 2px;
+        }
+
         .form-container button {
-            width: 100%; padding: 14px; border: none; border-radius: 8px;
-            background: #e94560; color: #fff; font-size: 16px;
-            cursor: pointer; font-weight: 600; margin-top: 10px;
+            width: 100%;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #e94560 0%, #d63d56 100%);
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(233,69,96,0.3);
         }
-        .form-container button:disabled { background: #444; cursor: not-allowed; }
-        .form-container button:hover:not(:disabled) { background: #ff6b6b; }
+        .form-container button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(233,69,96,0.4);
+        }
+        .form-container button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        .form-container button:disabled {
+            background: #374151;
+            box-shadow: none;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
         .form-container button.secondary {
-            background: #0f3460; margin-top: 10px;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.15);
+            box-shadow: none;
+            margin-top: 12px;
         }
-        .form-container button.secondary:hover { background: #1a4a8a; }
+        .form-container button.secondary:hover {
+            background: rgba(255,255,255,0.05);
+            border-color: rgba(255,255,255,0.25);
+        }
 
         /* Saved sessions list */
         .saved-sessions {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
         }
         .saved-sessions h3 {
-            color: #888;
-            font-size: 12px;
-            margin-bottom: 8px;
+            color: #6b7280;
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 12px;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .saved-session {
             display: flex;
             align-items: center;
-            padding: 10px 12px;
-            background: #0f3460;
-            border-radius: 6px;
-            margin-bottom: 6px;
+            padding: 12px 14px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            margin-bottom: 8px;
             cursor: pointer;
+            transition: all 0.15s ease;
         }
-        .saved-session:hover { background: #1a4a8a; }
-        .saved-session .session-name { flex: 1; color: #fff; font-size: 14px; }
-        .saved-session .session-code { color: #888; font-size: 12px; margin-right: 8px; }
+        .saved-session:hover {
+            background: rgba(255,255,255,0.05);
+            border-color: rgba(255,255,255,0.12);
+        }
+        .saved-session .session-name {
+            flex: 1;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .saved-session .session-code {
+            color: #6b7280;
+            font-size: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
+            margin-right: 12px;
+            padding: 4px 8px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+        }
         .saved-session .session-delete {
             opacity: 0;
-            color: #ff6b6b;
-            font-size: 16px;
-            padding: 4px;
+            color: #f87171;
+            font-size: 18px;
+            padding: 4px 8px;
+            transition: opacity 0.15s;
         }
-        .saved-session:hover .session-delete { opacity: 0.6; }
+        .saved-session:hover .session-delete { opacity: 0.5; }
         .saved-session .session-delete:hover { opacity: 1; }
+
+        /* Responsive adjustments */
+        @media (max-width: 480px) {
+            .connect-screen { padding: 16px; }
+            .form-container { padding: 20px; }
+            .connect-header h1 { font-size: 20px; }
+            .form-group input.code-input { font-size: 20px; letter-spacing: 4px; }
+        }
+
+        /* Spinner */
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: #e94560;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
 
         /* Terminal container */
         .terminal-screen {
@@ -785,9 +935,12 @@
 
             container.innerHTML = `
                 <div class="connect-screen">
-                    <div class="logo">🔗</div>
-                    <h1>Terminal Tunnel</h1>
-                    <div class="status-text status">Initializing...</div>
+                    <div class="connect-header">
+                        <div class="logo">>_</div>
+                        <h1>Terminal Tunnel</h1>
+                        <p class="tagline">Secure terminal sharing</p>
+                    </div>
+                    <div class="status-text">Initializing...</div>
                     <div class="form-area"></div>
                     <div class="spinner hidden"></div>
                 </div>
@@ -818,14 +971,18 @@
             const statusText = session.connectScreen.querySelector('.status-text');
 
             if (mode === 'password') {
-                statusText.textContent = `Session code: ${session.code}. Enter password to connect.`;
+                statusText.textContent = `Connecting to session ${session.code}`;
                 // Security: Use escapeHtml for user-provided data
                 formArea.innerHTML = `
                     <div class="form-container">
-                        <label>Session Name (optional)</label>
-                        <input type="text" class="name-input" placeholder="e.g., Dev Server" value="${escapeHtml(session.name || '')}">
-                        <label>Password</label>
-                        <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                        <div class="form-group">
+                            <label>Session Name (optional)</label>
+                            <input type="text" class="name-input" placeholder="e.g., Dev Server" value="${escapeHtml(session.name || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" class="password-input" placeholder="Enter session password" autocomplete="off">
+                        </div>
                         <button class="connect-btn">Connect</button>
                     </div>
                 `;
@@ -844,16 +1001,22 @@
                     </div>
                 ` : '';
 
-                statusText.textContent = 'Enter session code and password';
+                statusText.textContent = 'Enter session code and password to connect';
                 formArea.innerHTML = `
                     <div class="form-container">
                         ${savedHtml}
-                        <label>Session Code</label>
-                        <input type="text" class="code-input" placeholder="ABC12345" maxlength="8" autocomplete="off" value="${escapeHtml(session.code || '')}">
-                        <label>Session Name (optional)</label>
-                        <input type="text" class="name-input" placeholder="e.g., Dev Server">
-                        <label>Password</label>
-                        <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                        <div class="form-group">
+                            <label>Session Code</label>
+                            <input type="text" class="code-input" placeholder="ABCD1234" maxlength="8" autocomplete="off" value="${escapeHtml(session.code || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label>Session Name (optional)</label>
+                            <input type="text" class="name-input" placeholder="e.g., Dev Server">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" class="password-input" placeholder="Enter session password" autocomplete="off">
+                        </div>
                         <button class="connect-btn">Connect</button>
                     </div>
                 `;
