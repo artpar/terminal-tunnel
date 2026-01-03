@@ -842,7 +842,8 @@ func (s *Server) Start(ctx ...context.Context) error {
 				select {
 				case <-dcOpen:
 					s.log("✓ Data channel connected (instant reconnect)\n")
-				case <-time.After(10 * time.Second):
+				case <-time.After(30 * time.Second):
+					// Use 30s timeout to allow TURN relay connectivity checks on mobile
 					standbyPeer.Close()
 					s.log("⚠ Standby connection timeout\n")
 					continue

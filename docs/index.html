@@ -1009,7 +1009,26 @@
             // Use session-specific ICE servers (includes TURN with credentials tied to session)
             // This ensures both server and client use the same TURN credentials
             const iceServers = session.iceServers || await fetchICEServers(session.relayUrl);
+            console.log('[ICE] Configured servers:', JSON.stringify(iceServers.map(s => ({
+                urls: s.urls,
+                hasCredential: !!s.credential
+            }))));
             session.pc = new RTCPeerConnection({ iceServers });
+
+            // Track gathered candidates for debugging
+            let candidateCounts = { host: 0, srflx: 0, relay: 0 };
+            session.pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    const type = event.candidate.type || 'unknown';
+                    candidateCounts[type] = (candidateCounts[type] || 0) + 1;
+                    if (type === 'relay') {
+                        console.log('[ICE] Gathered TURN relay candidate:', event.candidate.address);
+                    }
+                } else {
+                    // Null candidate means gathering is complete
+                    console.log('[ICE] Gathering complete. Candidates:', JSON.stringify(candidateCounts));
+                }
+            };
 
             session.pc.ondatachannel = (event) => {
                 session.dc = event.channel;
@@ -1629,16 +1648,24 @@
 
         function waitForICE(pc) {
             return new Promise((resolve) => {
-                if (pc.iceGatheringState === 'complete') { resolve(); return; }
+                if (pc.iceGatheringState === 'complete') {
+                    console.log('[ICE] Gathering already complete');
+                    resolve();
+                    return;
+                }
                 const check = () => {
+                    console.log('[ICE] Gathering state:', pc.iceGatheringState);
                     if (pc.iceGatheringState === 'complete') {
                         pc.removeEventListener('icegatheringstatechange', check);
                         resolve();
                     }
                 };
                 pc.addEventListener('icegatheringstatechange', check);
-                // Wait longer for TURN relay candidates to be gathered (mobile networks need more time)
-                setTimeout(resolve, 10000);
+                // Wait for TURN relay candidates on slow mobile networks (TURN can take 10-15s)
+                setTimeout(() => {
+                    console.log('[ICE] Gathering timeout reached, state:', pc.iceGatheringState);
+                    resolve();
+                }, 15000);
             });
         }
 
