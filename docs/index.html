@@ -1076,7 +1076,7 @@
                             // Retry with fresh session fetch
                             attemptAutoReconnect(session);
                         }
-                    }, 5000); // 5 second stall threshold
+                    }, 30000); // 30 second stall threshold - TURN relay needs time
                 } else if (session.pc.iceConnectionState === 'connected' ||
                            session.pc.iceConnectionState === 'completed') {
                     // ICE succeeded - clear stall timer
@@ -1637,7 +1637,8 @@
                     }
                 };
                 pc.addEventListener('icegatheringstatechange', check);
-                setTimeout(resolve, 3000);
+                // Wait longer for TURN relay candidates to be gathered (mobile networks need more time)
+                setTimeout(resolve, 10000);
             });
         }
 
