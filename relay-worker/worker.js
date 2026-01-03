@@ -114,6 +114,13 @@ const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CODE_LENGTH = 8;
 const EXPIRY_SECONDS = 86400; // 24 hours
 
+// Rate limiting configuration
+const RATE_LIMITS = {
+  SESSION_LOOKUP: { requests: 30, windowSeconds: 60 },   // 30 req/min for GET /session/:code
+  SESSION_CREATE: { requests: 10, windowSeconds: 60 },   // 10 req/min for POST /session
+  SESSION_ANSWER: { requests: 30, windowSeconds: 60 },   // 30 req/min for POST /session/:code/answer
+};
+
 // Default STUN servers (free, public)
 const DEFAULT_STUN_SERVERS = [
   'stun:stun.l.google.com:19302',
@@ -206,14 +213,111 @@ function isExpired(createdAt) {
   return (now - createdAt) > EXPIRY_SECONDS;
 }
 
-export default {
-  // Scheduled cleanup of expired sessions (runs hourly via cron)
-  async scheduled(event, env, ctx) {
-    const cutoff = Math.floor(Date.now() / 1000) - EXPIRY_SECONDS;
+// Get client IP from request
+function getClientIP(request) {
+  return request.headers.get('CF-Connecting-IP') ||
+         request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ||
+         'unknown';
+}
+
+// Check rate limit - returns { allowed: boolean, remaining: number, reset: number }
+async function checkRateLimit(env, ip, action) {
+  const limit = RATE_LIMITS[action];
+  if (!limit) return { allowed: true, remaining: 999, reset: 0 };
+
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = now - limit.windowSeconds;
+  const key = `${ip}:${action}`;
+
+  try {
+    // Get current count for this window
     const result = await env.DB.prepare(
+      'SELECT count, window_start FROM rate_limits WHERE key = ? AND window_start > ?'
+    ).bind(key, windowStart).first();
+
+    let count = 0;
+    let windowStartTime = now;
+
+    if (result) {
+      count = result.count;
+      windowStartTime = result.window_start;
+    }
+
+    // Check if over limit
+    if (count >= limit.requests) {
+      return {
+        allowed: false,
+        remaining: 0,
+        reset: windowStartTime + limit.windowSeconds - now
+      };
+    }
+
+    // Increment counter (upsert)
+    await env.DB.prepare(
+      `INSERT INTO rate_limits (key, count, window_start) VALUES (?, 1, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         count = CASE WHEN window_start > ? THEN count + 1 ELSE 1 END,
+         window_start = CASE WHEN window_start > ? THEN window_start ELSE ? END`
+    ).bind(key, now, windowStart, windowStart, now).run();
+
+    return {
+      allowed: true,
+      remaining: limit.requests - count - 1,
+      reset: limit.windowSeconds
+    };
+  } catch (e) {
+    // If rate_limits table doesn't exist, create it and allow request
+    if (e.message?.includes('no such table')) {
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS rate_limits (
+          key TEXT PRIMARY KEY,
+          count INTEGER DEFAULT 1,
+          window_start INTEGER
+        )`
+      ).run();
+      return { allowed: true, remaining: limit.requests - 1, reset: limit.windowSeconds };
+    }
+    // On other errors, allow request (fail open) but log
+    console.error('Rate limit check failed:', e);
+    return { allowed: true, remaining: 999, reset: 0 };
+  }
+}
+
+// Return rate limit exceeded response
+function rateLimitResponse(corsHeaders, reset) {
+  return new Response(JSON.stringify({
+    error: 'Rate limit exceeded. Try again later.',
+    retry_after: reset
+  }), {
+    status: 429,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json',
+      'Retry-After': String(reset)
+    }
+  });
+}
+
+export default {
+  // Scheduled cleanup of expired sessions and rate limits (runs hourly via cron)
+  async scheduled(event, env, ctx) {
+    const now = Math.floor(Date.now() / 1000);
+    const sessionCutoff = now - EXPIRY_SECONDS;
+    const rateLimitCutoff = now - 300; // Clean rate limits older than 5 minutes
+
+    const sessionResult = await env.DB.prepare(
       'DELETE FROM sessions WHERE created_at < ?'
-    ).bind(cutoff).run();
-    console.log(`Cleanup: deleted ${result.meta.changes} expired sessions`);
+    ).bind(sessionCutoff).run();
+
+    // Clean old rate limit entries (fail silently if table doesn't exist)
+    try {
+      const rateResult = await env.DB.prepare(
+        'DELETE FROM rate_limits WHERE window_start < ?'
+      ).bind(rateLimitCutoff).run();
+      console.log(`Cleanup: deleted ${sessionResult.meta.changes} sessions, ${rateResult.meta.changes} rate limits`);
+    } catch (e) {
+      console.log(`Cleanup: deleted ${sessionResult.meta.changes} sessions`);
+    }
   },
 
   async fetch(request, env) {
@@ -276,6 +380,13 @@ export default {
 
       // POST /session - create new session
       if (path === '/session' && request.method === 'POST') {
+        // Rate limit session creation
+        const clientIP = getClientIP(request);
+        const rateCheck = await checkRateLimit(env, clientIP, 'SESSION_CREATE');
+        if (!rateCheck.allowed) {
+          return rateLimitResponse(corsHeaders, rateCheck.reset);
+        }
+
         const { sdp, salt, viewer_sdp, viewer_key } = await request.json();
         if (!sdp) {
           return new Response(JSON.stringify({ error: 'SDP required' }), {
@@ -314,6 +425,13 @@ export default {
       // GET /session/{code} - get session SDP
       const sessionMatch = path.match(/^\/session\/([A-Z0-9]+)$/i);
       if (sessionMatch && request.method === 'GET') {
+        // Rate limit session lookups (brute force protection)
+        const clientIP = getClientIP(request);
+        const rateCheck = await checkRateLimit(env, clientIP, 'SESSION_LOOKUP');
+        if (!rateCheck.allowed) {
+          return rateLimitResponse(corsHeaders, rateCheck.reset);
+        }
+
         const code = sessionMatch[1].toUpperCase();
         const session = await env.DB.prepare(
           'SELECT * FROM sessions WHERE code = ?'
@@ -411,6 +529,13 @@ export default {
       // POST /session/{code}/answer - submit answer
       const answerPostMatch = path.match(/^\/session\/([A-Z0-9]+)\/answer$/i);
       if (answerPostMatch && request.method === 'POST') {
+        // Rate limit answer submissions
+        const clientIP = getClientIP(request);
+        const rateCheck = await checkRateLimit(env, clientIP, 'SESSION_ANSWER');
+        if (!rateCheck.allowed) {
+          return rateLimitResponse(corsHeaders, rateCheck.reset);
+        }
+
         const code = answerPostMatch[1].toUpperCase();
         const { sdp } = await request.json();
 
