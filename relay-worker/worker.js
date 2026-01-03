@@ -112,7 +112,7 @@ const serviceWorker = "self.addEventListener('install', e => self.skipWaiting())
 
 const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CODE_LENGTH = 8;
-const EXPIRY_SECONDS = 300; // 5 minutes
+const EXPIRY_SECONDS = 86400; // 24 hours
 
 // Default STUN servers (free, public)
 const DEFAULT_STUN_SERVERS = [

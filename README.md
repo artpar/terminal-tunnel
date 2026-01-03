@@ -383,7 +383,7 @@ asciinema upload recording.cast
 - All terminal I/O encrypted end-to-end
 - Password never transmitted (key derived locally)
 - Relay only sees encrypted signaling metadata
-- Session codes expire in 5 minutes
+- Session codes expire in 24 hours
 
 ### Relay Server Data
 

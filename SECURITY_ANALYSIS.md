@@ -131,10 +131,10 @@ const maxAttemptsPerMinute = 10
 **Location**: `internal/signaling/relayserver/server.go:95-97`
 
 ```go
-expiration: 5 * time.Minute,
+expiration: 24 * time.Hour,
 ```
 
-Sessions expire after 5 minutes, limiting the attack window.
+Sessions expire after 24 hours, limiting the attack window.
 
 ### 2.3 Password Auto-Generation ⚠️ HIGH
 

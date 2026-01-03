@@ -181,7 +181,7 @@ func NewRelayServer() *RelayServer {
 	rs := &RelayServer{
 		sessions:    make(map[string]*Session),
 		shortCodes:  make(map[string]*Session),
-		expiration:  5 * time.Minute,
+		expiration:  24 * time.Hour,
 		rateLimiter: NewRateLimiter(),
 	}
 
