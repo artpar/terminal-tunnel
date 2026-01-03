@@ -399,6 +399,20 @@ go build -o tt ./cmd/terminal-tunnel/
 # 3. Start new session (old sessions need manual restart)
 ```
 
+### API Testing with Bruno
+
+A complete [Bruno](https://www.usebruno.com/) API collection is available for testing the relay server:
+
+```bash
+# Open in Bruno
+bruno open examples/courier-collection
+
+# Or run from CLI
+bruno run examples/courier-collection --env Local
+```
+
+See [examples/courier-collection](examples/courier-collection/) for pre-request scripts, tests, and WebSocket documentation.
+
 ## Security
 
 ### Encryption
