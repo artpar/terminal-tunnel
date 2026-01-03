@@ -164,231 +164,173 @@
             display: flex;
         }
 
-        /* Connection screen (for new/reconnect) */
+        /* Connection screen */
         .connect-screen {
             display: none;
             flex: 1;
             flex-direction: column;
-            justify-content: center;
+            justify-content: flex-start;
             align-items: center;
-            padding: 24px;
-            background: linear-gradient(135deg, #0a0f1a 0%, #1a1f2e 100%);
+            padding: 20px;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
         .connect-screen.active { display: flex; }
 
-        .connect-header {
-            text-align: center;
-            margin-bottom: 32px;
+        .connect-box {
+            width: 100%;
+            max-width: 400px;
+            padding-top: 40px;
+            padding-bottom: 40px;
         }
-        .connect-header .logo {
-            width: 56px;
-            height: 56px;
-            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 16px;
-            font-size: 28px;
-            box-shadow: 0 8px 32px rgba(233, 69, 96, 0.3);
+        /* Center vertically only on tall screens */
+        @media (min-height: 600px) {
+            .connect-box {
+                padding-top: 0;
+                padding-bottom: 0;
+                margin-top: auto;
+                margin-bottom: auto;
+            }
         }
-        .connect-header h1 {
+
+        .connect-title {
             color: #fff;
-            font-size: 22px;
-            font-weight: 600;
-            margin: 0 0 8px 0;
-            letter-spacing: -0.5px;
-        }
-        .connect-header .tagline {
-            color: #6b7280;
-            font-size: 14px;
-            margin: 0;
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 20px;
+            text-align: center;
         }
 
         .status-text {
-            color: #9ca3af;
+            color: #888;
             font-size: 14px;
             text-align: center;
-            margin-bottom: 24px;
-            padding: 12px 16px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 8px;
-            border: 1px solid rgba(255,255,255,0.06);
+            margin-bottom: 16px;
         }
-        .status-text.error { color: #f87171; background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.2); }
-        .status-text.success { color: #4ade80; background: rgba(74,222,128,0.1); border-color: rgba(74,222,128,0.2); }
+        .status-text.error { color: #ff6b6b; }
+        .status-text.success { color: #4ecdc4; }
 
-        .form-container {
-            background: rgba(255,255,255,0.03);
-            padding: 24px;
-            border-radius: 16px;
+        .form-row {
+            margin-bottom: 16px;
+        }
+        .form-row label {
+            color: #888;
+            font-size: 13px;
+            display: block;
+            margin-bottom: 6px;
+        }
+        .form-row input {
             width: 100%;
-            max-width: 360px;
-            border: 1px solid rgba(255,255,255,0.06);
-            backdrop-filter: blur(10px);
+            padding: 12px;
+            background: #0f0f1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 16px;
+        }
+        .form-row input:focus {
+            outline: none;
+            border-color: #4ecdc4;
+        }
+        .form-row input.code-input {
+            font-size: 20px;
+            text-align: center;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            font-family: monospace;
+        }
+        .form-row input::placeholder { color: #555; }
+
+        .form-row.optional label::after {
+            content: ' (optional)';
+            color: #555;
+            font-weight: normal;
         }
 
-        .form-group {
+        .connect-btn {
+            width: 100%;
+            padding: 14px;
+            background: #4ecdc4;
+            border: none;
+            border-radius: 6px;
+            color: #000;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+        .connect-btn:hover { background: #3dbdb5; }
+        .connect-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+
+        /* Recent sessions */
+        .recent-sessions {
             margin-bottom: 20px;
         }
-        .form-group:last-of-type {
-            margin-bottom: 24px;
-        }
-        .form-group label {
-            color: #9ca3af;
-            display: block;
+        .recent-sessions-title {
+            color: #666;
+            font-size: 12px;
+            text-transform: uppercase;
             margin-bottom: 8px;
-            font-size: 13px;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
-        .form-group input {
-            width: 100%;
-            padding: 14px 16px;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 10px;
-            background: rgba(0,0,0,0.3);
-            color: #fff;
-            font-size: 15px;
-            font-family: inherit;
-            transition: all 0.2s ease;
-        }
-        .form-group input::placeholder {
-            color: #4b5563;
-        }
-        .form-group input:hover {
-            border-color: rgba(255,255,255,0.2);
-        }
-        .form-group input:focus {
-            outline: none;
-            border-color: #e94560;
-            box-shadow: 0 0 0 3px rgba(233,69,96,0.15);
-        }
-        .form-group input.code-input {
-            font-size: 22px;
-            text-align: center;
-            letter-spacing: 6px;
-            text-transform: uppercase;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-            padding: 16px;
-        }
-        .form-group input.code-input::placeholder {
-            letter-spacing: 2px;
-        }
-
-        .form-container button {
-            width: 100%;
-            padding: 14px 20px;
-            border: none;
-            border-radius: 10px;
-            background: linear-gradient(135deg, #e94560 0%, #d63d56 100%);
-            color: #fff;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(233,69,96,0.3);
-        }
-        .form-container button:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 20px rgba(233,69,96,0.4);
-        }
-        .form-container button:active:not(:disabled) {
-            transform: translateY(0);
-        }
-        .form-container button:disabled {
-            background: #374151;
-            box-shadow: none;
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
-        .form-container button.secondary {
-            background: transparent;
-            border: 1px solid rgba(255,255,255,0.15);
-            box-shadow: none;
-            margin-top: 12px;
-        }
-        .form-container button.secondary:hover {
-            background: rgba(255,255,255,0.05);
-            border-color: rgba(255,255,255,0.25);
-        }
-
-        /* Saved sessions list */
-        .saved-sessions {
-            margin-bottom: 24px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-        }
-        .saved-sessions h3 {
-            color: #6b7280;
-            font-size: 11px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .saved-session {
+        .recent-item {
             display: flex;
             align-items: center;
-            padding: 12px 14px;
-            background: rgba(0,0,0,0.2);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 10px;
-            margin-bottom: 8px;
+            padding: 10px 12px;
+            background: #0f0f1a;
+            border: 1px solid #222;
+            border-radius: 6px;
+            margin-bottom: 6px;
             cursor: pointer;
-            transition: all 0.15s ease;
         }
-        .saved-session:hover {
-            background: rgba(255,255,255,0.05);
-            border-color: rgba(255,255,255,0.12);
-        }
-        .saved-session .session-name {
-            flex: 1;
-            color: #fff;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        .saved-session .session-code {
-            color: #6b7280;
-            font-size: 12px;
-            font-family: 'SF Mono', Monaco, monospace;
-            margin-right: 12px;
-            padding: 4px 8px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 4px;
-        }
-        .saved-session .session-delete {
+        .recent-item:hover { border-color: #444; }
+        .recent-item .name { flex: 1; color: #fff; font-size: 14px; }
+        .recent-item .code { color: #666; font-size: 12px; font-family: monospace; }
+        .recent-item .delete {
+            color: #666;
+            margin-left: 8px;
+            padding: 4px;
             opacity: 0;
-            color: #f87171;
-            font-size: 18px;
-            padding: 4px 8px;
-            transition: opacity 0.15s;
         }
-        .saved-session:hover .session-delete { opacity: 0.5; }
-        .saved-session .session-delete:hover { opacity: 1; }
+        .recent-item:hover .delete { opacity: 1; }
+        .recent-item .delete:hover { color: #ff6b6b; }
 
-        /* Responsive adjustments */
-        @media (max-width: 480px) {
-            .connect-screen { padding: 16px; }
-            .form-container { padding: 20px; }
-            .connect-header h1 { font-size: 20px; }
-            .form-group input.code-input { font-size: 20px; letter-spacing: 4px; }
+        .divider {
+            border-top: 1px solid #222;
+            margin: 16px 0;
         }
 
-        /* Spinner */
         .spinner {
-            width: 32px;
-            height: 32px;
-            border: 3px solid rgba(255,255,255,0.1);
-            border-top-color: #e94560;
+            width: 24px;
+            height: 24px;
+            border: 2px solid #333;
+            border-top-color: #4ecdc4;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
             margin: 20px auto;
         }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        .spinner.hidden { display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Mobile responsive adjustments for connect screen */
+        @media (max-width: 480px) {
+            .connect-screen { padding: 16px; }
+            .connect-title { font-size: 16px; margin-bottom: 16px; }
+            .form-row { margin-bottom: 12px; }
+            .form-row input { padding: 10px; }
+            .connect-btn { padding: 12px; }
+            .recent-item { padding: 8px 10px; }
+            .recent-item .delete { opacity: 0.6; } /* Always visible on touch */
+        }
+        /* Very short screens (landscape phones) */
+        @media (max-height: 400px) {
+            .connect-screen { padding: 12px; }
+            .connect-box { padding-top: 8px; padding-bottom: 8px; }
+            .connect-title { font-size: 14px; margin-bottom: 12px; }
+            .form-row { margin-bottom: 8px; }
+            .form-row input { padding: 8px; }
+            .connect-btn { padding: 10px; }
+            .recent-sessions { margin-bottom: 12px; }
+            .recent-item { padding: 6px 8px; margin-bottom: 4px; }
         }
 
         /* Terminal container */
@@ -935,14 +877,12 @@
 
             container.innerHTML = `
                 <div class="connect-screen">
-                    <div class="connect-header">
-                        <div class="logo">>_</div>
-                        <h1>Terminal Tunnel</h1>
-                        <p class="tagline">Secure terminal sharing</p>
+                    <div class="connect-box">
+                        <div class="connect-title">Terminal Tunnel</div>
+                        <div class="status-text">Enter session details</div>
+                        <div class="form-area"></div>
+                        <div class="spinner hidden"></div>
                     </div>
-                    <div class="status-text">Initializing...</div>
-                    <div class="form-area"></div>
-                    <div class="spinner hidden"></div>
                 </div>
                 <div class="terminal-screen">
                     <div class="terminal-container">
@@ -971,54 +911,49 @@
             const statusText = session.connectScreen.querySelector('.status-text');
 
             if (mode === 'password') {
-                statusText.textContent = `Connecting to session ${session.code}`;
-                // Security: Use escapeHtml for user-provided data
+                statusText.textContent = `Session: ${session.code}`;
                 formArea.innerHTML = `
-                    <div class="form-container">
-                        <div class="form-group">
-                            <label>Session Name (optional)</label>
-                            <input type="text" class="name-input" placeholder="e.g., Dev Server" value="${escapeHtml(session.name || '')}">
-                        </div>
-                        <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" class="password-input" placeholder="Enter session password" autocomplete="off">
-                        </div>
-                        <button class="connect-btn">Connect</button>
+                    <div class="form-row optional">
+                        <label>Name</label>
+                        <input type="text" class="name-input" placeholder="e.g., Dev Server" value="${escapeHtml(session.name || '')}">
                     </div>
+                    <div class="form-row">
+                        <label>Password</label>
+                        <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                    </div>
+                    <button class="connect-btn">Connect</button>
                 `;
             } else {
-                // Security: Use escapeHtml for all user-provided data
-                const savedHtml = manager.savedSessions.length > 0 ? `
-                    <div class="saved-sessions">
-                        <h3>Recent Sessions</h3>
+                const recentHtml = manager.savedSessions.length > 0 ? `
+                    <div class="recent-sessions">
+                        <div class="recent-sessions-title">Recent</div>
                         ${manager.savedSessions.map(s => `
-                            <div class="saved-session" data-code="${escapeHtml(s.code)}" data-name="${escapeHtml(s.name || '')}" data-relay="${escapeHtml(s.relayUrl || RELAY_URL)}">
-                                <span class="session-name">${escapeHtml(s.name || s.code)}</span>
-                                <span class="session-code">${escapeHtml(s.code)}</span>
-                                <span class="session-delete" data-action="delete">&times;</span>
+                            <div class="recent-item" data-code="${escapeHtml(s.code)}" data-name="${escapeHtml(s.name || '')}" data-relay="${escapeHtml(s.relayUrl || RELAY_URL)}">
+                                <span class="name">${escapeHtml(s.name || s.code)}</span>
+                                <span class="code">${escapeHtml(s.code)}</span>
+                                <span class="delete" data-action="delete">&times;</span>
                             </div>
                         `).join('')}
                     </div>
+                    <div class="divider"></div>
                 ` : '';
 
-                statusText.textContent = 'Enter session code and password to connect';
+                statusText.textContent = '';
                 formArea.innerHTML = `
-                    <div class="form-container">
-                        ${savedHtml}
-                        <div class="form-group">
-                            <label>Session Code</label>
-                            <input type="text" class="code-input" placeholder="ABCD1234" maxlength="8" autocomplete="off" value="${escapeHtml(session.code || '')}">
-                        </div>
-                        <div class="form-group">
-                            <label>Session Name (optional)</label>
-                            <input type="text" class="name-input" placeholder="e.g., Dev Server">
-                        </div>
-                        <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" class="password-input" placeholder="Enter session password" autocomplete="off">
-                        </div>
-                        <button class="connect-btn">Connect</button>
+                    ${recentHtml}
+                    <div class="form-row">
+                        <label>Code</label>
+                        <input type="text" class="code-input" placeholder="ABCD1234" maxlength="8" autocomplete="off" value="${escapeHtml(session.code || '')}">
                     </div>
+                    <div class="form-row">
+                        <label>Password</label>
+                        <input type="password" class="password-input" placeholder="Session password" autocomplete="off">
+                    </div>
+                    <div class="form-row optional">
+                        <label>Name</label>
+                        <input type="text" class="name-input" placeholder="e.g., Dev Server">
+                    </div>
+                    <button class="connect-btn">Connect</button>
                 `;
             }
 
@@ -1038,12 +973,20 @@
                 });
             }
 
-            // Saved session click handlers
-            formArea.querySelectorAll('.saved-session').forEach(el => {
+            // Recent session click handlers
+            formArea.querySelectorAll('.recent-item').forEach(el => {
                 el.addEventListener('click', (e) => {
                     if (e.target.dataset.action === 'delete') {
+                        e.stopPropagation();
                         manager.deleteSavedSession(el.dataset.code);
                         el.remove();
+                        // Remove recent section if empty
+                        const recentSection = formArea.querySelector('.recent-sessions');
+                        if (recentSection && recentSection.querySelectorAll('.recent-item').length === 0) {
+                            recentSection.remove();
+                            const divider = formArea.querySelector('.divider');
+                            if (divider) divider.remove();
+                        }
                         return;
                     }
                     if (codeInput) codeInput.value = el.dataset.code;
