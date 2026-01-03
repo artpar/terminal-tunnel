@@ -33,3 +33,8 @@ Thumbs.db
 # API test dependencies
 examples/courier-collection/scripts/node_modules/
 .relay.pid
+
+# Build artifacts
+tt-linux-*
+tt-darwin-*
+tt-windows-*
