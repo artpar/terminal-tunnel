@@ -14,6 +14,13 @@
         worker-src 'self' blob:;
     ">
     <title>Terminal Tunnel</title>
+    <!-- PWA Support -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TermTunnel">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%231a1a2e' width='512' height='512' rx='64'/><text x='256' y='300' text-anchor='middle' font-size='200' font-family='monospace' fill='%234ecdc4'>%3E_</text></svg>">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -2129,6 +2136,13 @@
         // ============== Start ==============
         init();
         setupMobileViewport();
+
+        // Register service worker for PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('SW registered:', reg.scope))
+                .catch(err => console.log('SW registration failed:', err));
+        }
     })();
     </script>
 </body>

@@ -1,0 +1,27 @@
+{
+  "name": "Terminal Tunnel",
+  "short_name": "TermTunnel",
+  "description": "P2P terminal sharing with end-to-end encryption",
+  "start_url": "/terminal-tunnel/",
+  "scope": "/terminal-tunnel/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1a1a2e",
+  "theme_color": "#1a1a2e",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%231a1a2e' width='512' height='512' rx='64'/><text x='256' y='300' text-anchor='middle' font-size='200' font-family='monospace' fill='%234ecdc4'>%3E_</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["developer", "utilities"],
+  "shortcuts": [
+    {
+      "name": "New Connection",
+      "url": "/terminal-tunnel/",
+      "description": "Start a new terminal connection"
+    }
+  ]
+}
