@@ -213,8 +213,32 @@ make test-api
 
 ## WebSocket Testing
 
-Bruno doesn't natively support WebSocket. Use these tools:
+Bruno doesn't support WebSocket natively. Use the included Node.js test script:
 
+```bash
+# Install dependencies
+cd scripts && npm install
+
+# Run WebSocket tests
+node websocket-test.js
+
+# With verbose output
+node websocket-test.js --verbose
+
+# Test against production
+node websocket-test.js \
+  --url wss://terminal-tunnel-relay.artpar.workers.dev \
+  --api https://terminal-tunnel-relay.artpar.workers.dev
+```
+
+### Using Makefile
+```bash
+# From terminal-tunnel root
+make test-ws      # WebSocket tests only
+make test-all     # Bruno + WebSocket tests
+```
+
+### Manual Testing
 ```bash
 # Using wscat
 npm install -g wscat

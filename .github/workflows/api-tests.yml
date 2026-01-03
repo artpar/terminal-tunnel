@@ -64,15 +64,26 @@ jobs:
       - name: Run Bruno API tests
         run: |
           cd examples/courier-collection
-          bru run --env Local --output results.json
+          bru run --env Local --reporter-json results.json
         continue-on-error: true
+
+      - name: Install WebSocket test dependencies
+        run: |
+          cd examples/courier-collection/scripts
+          npm install
+
+      - name: Run WebSocket tests
+        run: |
+          cd examples/courier-collection/scripts
+          node websocket-test.js
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bruno-test-results
-          path: examples/courier-collection/results.json
+          name: api-test-results
+          path: |
+            examples/courier-collection/results.json
 
       - name: Stop relay server
         if: always()
@@ -81,7 +92,7 @@ jobs:
             kill $(cat relay.pid) 2>/dev/null || true
           fi
 
-      - name: Check test results
+      - name: Check Bruno test results
         run: |
           if [ -f examples/courier-collection/results.json ]; then
             # Check if any tests failed

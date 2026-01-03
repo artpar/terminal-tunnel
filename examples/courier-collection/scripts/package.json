@@ -1,0 +1,17 @@
+{
+  "name": "terminal-tunnel-api-tests",
+  "version": "1.0.0",
+  "description": "WebSocket and API test scripts for Terminal Tunnel",
+  "scripts": {
+    "test:ws": "node websocket-test.js",
+    "test:ws:verbose": "node websocket-test.js --verbose",
+    "test:ws:prod": "node websocket-test.js --url wss://terminal-tunnel-relay.artpar.workers.dev --api https://terminal-tunnel-relay.artpar.workers.dev"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {},
+  "keywords": ["terminal-tunnel", "websocket", "test"],
+  "author": "",
+  "license": "MIT"
+}

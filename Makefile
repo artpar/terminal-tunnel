@@ -7,7 +7,7 @@ LDFLAGS=-s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)
 BUILD_DIR=build
 DIST_DIR=dist
 
-.PHONY: all build clean test test-api build-all release install packages
+.PHONY: all build clean test test-api test-ws test-all build-all release install packages
 
 all: build
 
@@ -44,6 +44,67 @@ test-api: build
 		exit $$TEST_EXIT
 	@echo "========================================"
 	@echo "API tests complete"
+
+# Run WebSocket tests
+test-ws: build
+	@which node > /dev/null || (echo "Node.js not found. Install from https://nodejs.org" && exit 1)
+	@echo "Installing WebSocket test dependencies..."
+	@cd examples/courier-collection/scripts && npm install --silent
+	@echo ""
+	@echo "Starting relay server on port 8765..."
+	@./$(BINARY_NAME) relay --port 8765 & echo $$! > .relay.pid
+	@sleep 2
+	@if curl -s http://localhost:8765/health > /dev/null 2>&1; then \
+		echo "Relay server is running"; \
+	else \
+		echo "Failed to start relay server"; \
+		kill $$(cat .relay.pid) 2>/dev/null || true; \
+		rm -f .relay.pid; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "Running WebSocket tests..."
+	@echo "========================================"
+	@cd examples/courier-collection/scripts && node websocket-test.js 2>&1; \
+		TEST_EXIT=$$?; \
+		kill $$(cat ../../../.relay.pid) 2>/dev/null || true; \
+		rm -f ../../../.relay.pid; \
+		exit $$TEST_EXIT
+	@echo "========================================"
+	@echo "WebSocket tests complete"
+
+# Run all API tests (Bruno + WebSocket)
+test-all: build
+	@which bru > /dev/null || (echo "Bruno CLI not found. Install: npm install -g @usebruno/cli" && exit 1)
+	@which node > /dev/null || (echo "Node.js not found. Install from https://nodejs.org" && exit 1)
+	@cd examples/courier-collection/scripts && npm install --silent
+	@echo "Starting relay server on port 8765..."
+	@./$(BINARY_NAME) relay --port 8765 & echo $$! > .relay.pid
+	@sleep 2
+	@if curl -s http://localhost:8765/health > /dev/null 2>&1; then \
+		echo "Relay server is running"; \
+	else \
+		echo "Failed to start relay server"; \
+		kill $$(cat .relay.pid) 2>/dev/null || true; \
+		rm -f .relay.pid; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "========================================"
+	@echo "Running Bruno API tests..."
+	@echo "========================================"
+	@cd examples/courier-collection && bru run --env Local 2>&1 || true
+	@echo ""
+	@echo "========================================"
+	@echo "Running WebSocket tests..."
+	@echo "========================================"
+	@cd examples/courier-collection/scripts && node websocket-test.js 2>&1; \
+		TEST_EXIT=$$?; \
+		kill $$(cat ../../../.relay.pid) 2>/dev/null || true; \
+		rm -f ../../../.relay.pid; \
+		exit $$TEST_EXIT
+	@echo ""
+	@echo "All tests complete"
 
 # Clean build artifacts
 clean:
@@ -173,7 +234,9 @@ help:
 	@echo "  release    Create release archives with checksums"
 	@echo "  packages   Build DEB/RPM/APK packages (requires nfpm)"
 	@echo "  test       Run Go tests"
-	@echo "  test-api   Run Bruno API tests (requires: npm i -g @usebruno/cli)"
+	@echo "  test-api   Run Bruno HTTP API tests (requires: npm i -g @usebruno/cli)"
+	@echo "  test-ws    Run WebSocket tests (requires: node)"
+	@echo "  test-all   Run all API tests (Bruno + WebSocket)"
 	@echo "  install    Install to /usr/local/bin"
 	@echo "  uninstall  Remove from /usr/local/bin"
 	@echo "  clean      Remove build artifacts"

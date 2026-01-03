@@ -29,3 +29,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# API test dependencies
+examples/courier-collection/scripts/node_modules/
+.relay.pid
