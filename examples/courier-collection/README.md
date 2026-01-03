@@ -145,22 +145,70 @@ res.responseTime: lte 3000
 
 ## Running Tests
 
+### CLI Installation
+```bash
+npm install -g @usebruno/cli
+```
+
 ### All Tests
 ```bash
 # Run entire collection
-bruno run --env Local
+bru run --env Local
+```
+
+### Single Folder
+```bash
+# Run all requests in a folder
+bru run health --env Local
+bru run session --env Local
 ```
 
 ### Single Request
 ```bash
 # Run specific request
-bruno run session/1.\ Create\ Session.bru --env Local
+bru run "session/1. Create Session.bru" --env Local
 ```
 
 ### CI/CD Integration
 ```bash
-# With JUnit output
-bruno run --env Local --output results.xml
+# JSON output
+bru run --env Local --reporter-json results.json
+
+# JUnit XML (for CI systems)
+bru run --env Local --reporter-junit results.xml
+
+# HTML report
+bru run --env Local --reporter-html report.html
+
+# All formats at once
+bru run --env Local \
+  --reporter-json results.json \
+  --reporter-junit results.xml \
+  --reporter-html report.html
+```
+
+### Advanced Options
+```bash
+# Stop on first failure
+bru run --env Local --bail
+
+# Override environment variable
+bru run --env Local --env-var "baseUrl=http://other:8080"
+
+# Add delay between requests (rate limiting)
+bru run --env Local --delay 500
+
+# Only run requests with tests
+bru run --env Local --tests-only
+
+# Verbose output for debugging
+bru run --env Local --verbose
+```
+
+### Using Makefile
+```bash
+# From terminal-tunnel root
+make test-api
 ```
 
 ## WebSocket Testing
@@ -192,6 +240,51 @@ See `websocket/WebSocket Connection.bru` for full protocol documentation.
 
 - **7. Get Session Not Found** - Tests 404 response for invalid code
 - **8. Create Session Invalid** - Tests 400 response for missing SDP
+
+## Understanding Error Output
+
+### Connection Errors
+```
+health/Health Check (Error)
+Status: ✗ FAIL
+```
+**Cause**: Server not running or unreachable
+**Fix**: Start the relay server: `tt relay --port 8765`
+
+### Assertion Failures
+```
+Tests
+   ✕ Status is 200
+      expected 500 to equal 200
+   ✓ Response body is OK
+Assertions
+   ✕ res.status: eq 200
+      expected 500 to equal 200
+```
+**Cause**: Response didn't match expectations
+**Shows**: Test name, expected value, actual value
+
+### Script Errors
+```
+health/Script Error (Missing required variable: sessionCode)
+```
+**Cause**: Pre-request script threw an error
+**Fix**: Run prerequisite requests first (e.g., Create Session)
+
+### Environment Errors
+```
+Environment file not found: environments/NonExistent.bru
+```
+**Cause**: Invalid environment name
+**Fix**: Use `--env Local` or `--env Production`
+
+### HTTP Errors (Expected)
+```
+session/7. Get Session Not Found (404 Not Found) - 5 ms
+Tests
+   ✓ Status is 404
+```
+**Note**: 404/400 responses are expected for error test cases
 
 ## Collection-Level Scripts
 
