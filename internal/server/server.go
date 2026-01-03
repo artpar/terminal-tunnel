@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -527,6 +528,16 @@ func (s *Server) Start(ctx ...context.Context) error {
 			default:
 			}
 		})
+
+		// Debug: log answer SDP candidates when DEBUG_ICE is set
+		if os.Getenv("DEBUG_ICE") == "1" {
+			s.log("  [Debug] Answer SDP candidates:\n")
+			for _, line := range strings.Split(answer, "\n") {
+				if strings.Contains(line, "candidate") {
+					s.log("    %s\n", strings.TrimSpace(line))
+				}
+			}
+		}
 
 		// Set remote description
 		if err := peer.SetRemoteDescription(webrtc.SDPTypeAnswer, answer); err != nil {

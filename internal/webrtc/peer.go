@@ -9,8 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pion/logging"
 	"github.com/pion/webrtc/v4"
 )
+
+// DebugICE enables detailed ICE debugging when set to true
+var DebugICE = os.Getenv("DEBUG_ICE") == "1"
 
 // TURN environment variables
 const (
@@ -177,7 +181,23 @@ func NewPeer(config Config) (*Peer, error) {
 		ICEServers: iceServers,
 	}
 
-	pc, err := webrtc.NewPeerConnection(peerConfig)
+	var pc *webrtc.PeerConnection
+	var err error
+
+	if DebugICE {
+		// Create a custom API with logging for debugging
+		loggerFactory := logging.NewDefaultLoggerFactory()
+		loggerFactory.DefaultLogLevel = logging.LogLevelDebug
+
+		settingEngine := webrtc.SettingEngine{}
+		settingEngine.LoggerFactory = loggerFactory
+
+		api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+		pc, err = api.NewPeerConnection(peerConfig)
+	} else {
+		pc, err = webrtc.NewPeerConnection(peerConfig)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create peer connection: %w", err)
 	}
@@ -190,6 +210,13 @@ func NewPeer(config Config) (*Peer, error) {
 	// Set up connection state logging
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		// Connection state changes can be logged/handled here
+	})
+
+	// ICE candidate handler (available for debugging if needed)
+	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if DebugICE && c != nil {
+			fmt.Printf("  [ICE] Gathered: %s %s:%d (%s)\n", c.Typ.String(), c.Address, c.Port, c.Protocol.String())
+		}
 	})
 
 	return peer, nil

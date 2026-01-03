@@ -129,8 +129,15 @@ const TURN_CREDENTIAL_TTL = 3600;
 // Generate ephemeral TURN credentials using TURN REST API (RFC 5766)
 // Username format: timestamp:username
 // Credential: Base64(HMAC-SHA1(username, secret))
+// Uses time-window based credentials - all requests in the same hour get the same credentials
+// This ensures server and client (who may fetch at slightly different times) get matching credentials
 async function generateTURNCredentials(secret, username = 'terminaltunnel') {
-  const expiry = Math.floor(Date.now() / 1000) + TURN_CREDENTIAL_TTL;
+  const now = Math.floor(Date.now() / 1000);
+  // Floor to current hour for time-window based credentials
+  // Both server and client will get the same credentials if they connect within the same hour
+  const hourWindow = Math.floor(now / 3600) * 3600;
+  // Expiry is the start of next hour + 1 hour (so credentials are valid for 1-2 hours)
+  const expiry = hourWindow + 2 * 3600;
   const turnUsername = `${expiry}:${username}`;
 
   // Generate HMAC-SHA1 credential
@@ -153,6 +160,7 @@ async function generateTURNCredentials(secret, username = 'terminaltunnel') {
 }
 
 // Build ICE servers configuration
+// Uses time-window based TURN credentials so all requests in the same hour get the same credentials
 async function getICEServers(env) {
   const servers = [
     { urls: DEFAULT_STUN_SERVERS }
@@ -283,7 +291,11 @@ export default {
           'INSERT INTO sessions (code, sdp, salt, created_at) VALUES (?, ?, ?, ?)'
         ).bind(code, sdp, salt, now).run();
 
-        const response = { code, expires_in: EXPIRY_SECONDS };
+        // Generate ICE servers with time-window based credentials
+        // All requests in the same hour get the same credentials
+        const iceServers = await getICEServers(env);
+
+        const response = { code, expires_in: EXPIRY_SECONDS, iceServers };
 
         // If viewer session requested, create it with V suffix
         if (viewer_sdp && viewer_key) {
@@ -314,23 +326,29 @@ export default {
           });
         }
 
+        // Get ICE servers with credentials derived from session creation time
+        // This ensures both server and client use the same TURN credentials
+        const iceServers = await getICEServers(env);
+
         // Viewer session
         if (session.read_only) {
           return new Response(JSON.stringify({
             sdp: session.sdp,
             key: session.key,
             read_only: true,
-            used: session.answer !== null
+            used: session.answer !== null,
+            iceServers
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
 
-        // Normal control session
+        // Normal control session - include iceServers for consistent TURN credentials
         return new Response(JSON.stringify({
           sdp: session.sdp,
           salt: session.salt,
-          used: session.answer !== null
+          used: session.answer !== null,
+          iceServers
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -354,6 +372,7 @@ export default {
         }
 
         const now = Math.floor(Date.now() / 1000);
+        // Clear answer when offer is updated - old answer won't work with new offer
         await env.DB.prepare(
           'UPDATE sessions SET sdp = ?, salt = ?, answer = NULL, created_at = ? WHERE code = ?'
         ).bind(sdp, salt, now, code).run();

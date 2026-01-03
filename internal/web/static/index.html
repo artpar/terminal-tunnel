@@ -924,6 +924,9 @@
                     throw new Error('Invalid viewer session');
                 }
 
+                // Use session-specific ICE servers for consistent TURN credentials
+                session.iceServers = data.iceServers;
+
                 // Use the key directly from the relay (no password derivation needed)
                 statusText.textContent = 'Connecting (read-only mode)...';
                 session.encryptionKey = base64ToBytes(data.key);
@@ -981,6 +984,8 @@
                 }
                 const data = await response.json();
                 session.salt = base64ToBytes(data.salt || '');
+                // Use session-specific ICE servers for consistent TURN credentials
+                session.iceServers = data.iceServers;
 
                 statusText.textContent = 'Deriving encryption key...';
                 session.encryptionKey = await deriveKey(password, session.salt);
@@ -1001,8 +1006,9 @@
         async function establishConnection(session, offerSdp, code) {
             const statusText = session.connectScreen.querySelector('.status-text');
 
-            // Get ICE servers from relay (includes TURN if configured)
-            const iceServers = await fetchICEServers(session.relayUrl);
+            // Use session-specific ICE servers (includes TURN with credentials tied to session)
+            // This ensures both server and client use the same TURN credentials
+            const iceServers = session.iceServers || await fetchICEServers(session.relayUrl);
             session.pc = new RTCPeerConnection({ iceServers });
 
             session.pc.ondatachannel = (event) => {
@@ -1283,6 +1289,8 @@
                         }
                         const data = await response.json();
                         session.salt = base64ToBytes(data.salt || '');
+                        // Use session-specific ICE servers for consistent TURN credentials
+                        session.iceServers = data.iceServers;
 
                         // Re-derive key if salt changed, otherwise reuse
                         if (!session.encryptionKey) {

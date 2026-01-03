@@ -403,7 +403,7 @@ func runStartInteractive() error {
 			fmt.Printf("\n  Connect from another device. Shell starting below...\n")
 			fmt.Printf("  (Ctrl+C to exit)\n\n")
 
-			// Enable quiet mode to suppress output that would corrupt the terminal
+			// Enable quiet mode after connection info is shown
 			srv.SetQuiet(true)
 
 			// Start PTY immediately - don't wait for client
