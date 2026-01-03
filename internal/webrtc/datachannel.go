@@ -104,16 +104,22 @@ func (ec *EncryptedChannel) handleMessage(data []byte) {
 		return
 	}
 
+	// Get handlers under lock to avoid data race
+	ec.mu.Lock()
+	onDataHandler := ec.onData
+	onResizeHandler := ec.onResize
+	ec.mu.Unlock()
+
 	switch msg.Type {
 	case protocol.MsgData:
-		if ec.onData != nil {
-			ec.onData(msg.Payload)
+		if onDataHandler != nil {
+			onDataHandler(msg.Payload)
 		}
 	case protocol.MsgResize:
-		if ec.onResize != nil {
+		if onResizeHandler != nil {
 			resize, err := protocol.ParseResizePayload(msg.Payload)
 			if err == nil {
-				ec.onResize(resize.Rows, resize.Cols)
+				onResizeHandler(resize.Rows, resize.Cols)
 			}
 		}
 	case protocol.MsgPing:
