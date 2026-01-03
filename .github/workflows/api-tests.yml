@@ -1,0 +1,97 @@
+name: API Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/courier-collection/**'
+      - 'internal/signaling/**'
+      - 'relay-worker/**'
+      - '.github/workflows/api-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'examples/courier-collection/**'
+      - 'internal/signaling/**'
+      - 'relay-worker/**'
+      - '.github/workflows/api-tests.yml'
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '20'
+
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Bruno CLI
+        run: npm install -g @usebruno/cli
+
+      - name: Build relay server
+        run: go build -o tt ./cmd/terminal-tunnel
+
+      - name: Start relay server
+        run: |
+          ./tt relay --port 8765 &
+          echo $! > relay.pid
+          # Wait for server to start
+          for i in {1..30}; do
+            if curl -s http://localhost:8765/health > /dev/null 2>&1; then
+              echo "Relay server is ready"
+              break
+            fi
+            echo "Waiting for relay server... ($i/30)"
+            sleep 1
+          done
+
+      - name: Verify relay server is running
+        run: |
+          curl -f http://localhost:8765/health || (echo "Relay server not responding" && exit 1)
+
+      - name: Run Bruno API tests
+        run: |
+          cd examples/courier-collection
+          bru run --env Local --output results.json
+        continue-on-error: true
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bruno-test-results
+          path: examples/courier-collection/results.json
+
+      - name: Stop relay server
+        if: always()
+        run: |
+          if [ -f relay.pid ]; then
+            kill $(cat relay.pid) 2>/dev/null || true
+          fi
+
+      - name: Check test results
+        run: |
+          if [ -f examples/courier-collection/results.json ]; then
+            # Check if any tests failed
+            if grep -q '"status":"fail"' examples/courier-collection/results.json 2>/dev/null; then
+              echo "Some API tests failed"
+              cat examples/courier-collection/results.json
+              exit 1
+            fi
+            echo "All API tests passed"
+          else
+            echo "No test results found"
+            exit 1
+          fi
