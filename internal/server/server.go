@@ -255,11 +255,15 @@ func (s *Server) Start(ctx ...context.Context) error {
 	sigMethod := s.determineSignalingMethod()
 	fmt.Printf("Using signaling method: %s\n", sigMethod)
 
-	// Display TURN configuration
-	if s.webrtcConfig.UseTURN {
-		fmt.Printf("✓ TURN relay enabled for symmetric NAT traversal\n")
-	} else {
+	// Display TURN configuration status
+	if !s.webrtcConfig.UseTURN {
 		fmt.Printf("⚠ TURN disabled (may fail with symmetric NAT)\n")
+	} else if turnConfig := ttwebrtc.GetTURNFromEnv(); turnConfig != nil {
+		fmt.Printf("✓ TURN relay configured: %s\n", turnConfig.URLs[0])
+	} else if len(s.webrtcConfig.TURNServers) > 0 {
+		fmt.Printf("✓ TURN relay configured (custom servers)\n")
+	} else {
+		fmt.Printf("ℹ STUN-only mode (set TURN_URL for symmetric NAT support)\n")
 	}
 
 	isFirstConnection := true

@@ -441,13 +441,15 @@
         const MSG_DATA = 0x01, MSG_RESIZE = 0x02, MSG_PING = 0x03, MSG_PONG = 0x04, MSG_CLOSE = 0x05;
         const COMPACT_VERSION = 0x01, SALT_SIZE = 16;
 
-        // ICE servers - STUN only by default (no public TURN)
-        // TURN requires explicit server configuration
+        // ICE servers - STUN only (TURN requires user configuration)
+        // Works for most NAT types; symmetric NAT may need TURN
         function getICEServers() {
             return [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
             ];
         }
 

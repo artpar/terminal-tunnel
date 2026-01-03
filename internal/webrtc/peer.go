@@ -26,8 +26,12 @@ var defaultSTUNServers = []string{
 	"stun:stun2.l.google.com:19302",
 }
 
-// Note: No default TURN servers - users must configure their own for symmetric NAT
-// Set TURN_URL, TURN_USERNAME, TURN_PASSWORD environment variables to enable TURN
+// Note: No default TURN servers - public TURN services require signup
+// Users can configure TURN via environment variables:
+//   TURN_URL=turn:your-server.com:3478
+//   TURN_USERNAME=your-username
+//   TURN_PASSWORD=your-password
+// Or use --no-turn flag for STUN-only (works for most NAT types)
 
 // TURNConfig holds TURN server credentials
 type TURNConfig struct {
@@ -93,7 +97,7 @@ func buildICEServers(config Config) []webrtc.ICEServer {
 		URLs: defaultSTUNServers,
 	})
 
-	// Add TURN servers only if explicitly configured
+	// Add TURN servers for NAT traversal (if configured)
 	if config.UseTURN {
 		var turnConfigs []TURNConfig
 
@@ -104,7 +108,7 @@ func buildICEServers(config Config) []webrtc.ICEServer {
 			// Use custom TURN servers from config
 			turnConfigs = config.TURNServers
 		}
-		// No default TURN - users must configure their own
+		// Note: No default TURN - requires explicit configuration
 
 		for _, turn := range turnConfigs {
 			servers = append(servers, webrtc.ICEServer{
