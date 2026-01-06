@@ -64,31 +64,6 @@ scoop install terminal-tunnel
 </details>
 
 <details>
-<summary><b>Chocolatey (Windows)</b></summary>
-
-```powershell
-choco install terminal-tunnel
-```
-</details>
-
-<details>
-<summary><b>AUR (Arch Linux)</b></summary>
-
-```bash
-yay -S terminal-tunnel-bin
-# or: paru -S terminal-tunnel-bin
-```
-</details>
-
-<details>
-<summary><b>Snap (Linux)</b></summary>
-
-```bash
-sudo snap install terminal-tunnel
-```
-</details>
-
-<details>
 <summary><b>Nix</b></summary>
 
 ```bash
@@ -98,11 +73,12 @@ nix run github:artpar/terminal-tunnel
 </details>
 
 <details>
-<summary><b>APT (Debian/Ubuntu)</b></summary>
+<summary><b>DEB (Debian/Ubuntu)</b></summary>
 
 ```bash
-echo "deb [trusted=yes] https://artpar.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/terminal-tunnel.list
-sudo apt update && sudo apt install terminal-tunnel
+# Download from releases page - pick your architecture (amd64, arm64, or armv7)
+# https://github.com/artpar/terminal-tunnel/releases/latest
+sudo dpkg -i terminal-tunnel_*_linux_amd64.deb
 ```
 </details>
 
@@ -110,8 +86,9 @@ sudo apt update && sudo apt install terminal-tunnel
 <summary><b>RPM (Fedora/RHEL)</b></summary>
 
 ```bash
-curl -LO https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-1.4.1.x86_64.rpm
-sudo rpm -i tt-1.4.1.x86_64.rpm
+# Download from releases page - pick your architecture (amd64, arm64, or armv7)
+# https://github.com/artpar/terminal-tunnel/releases/latest
+sudo rpm -i terminal-tunnel_*_linux_amd64.rpm
 ```
 </details>
 
@@ -127,9 +104,9 @@ go install github.com/artpar/terminal-tunnel/cmd/terminal-tunnel@latest
 
 | Platform | Architectures | Formats |
 |----------|---------------|---------|
-| Linux | amd64, arm64, armv7 | tar.gz, .deb, .rpm, .apk, Snap, Nix |
+| Linux | amd64, arm64, armv7 | tar.gz, .deb, .rpm, .apk, Nix |
 | macOS | amd64, arm64 | tar.gz, Homebrew, Nix |
-| Windows | amd64, arm64 | .zip, Scoop, Chocolatey |
+| Windows | amd64, arm64 | .zip, Scoop |
 | FreeBSD | amd64 | tar.gz |
 
 See [Releases](https://github.com/artpar/terminal-tunnel/releases/latest) for all downloads.
