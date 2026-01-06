@@ -225,7 +225,13 @@ func TestOutOfOrderDelivery(t *testing.T) {
 
 	// Wait for delivery
 	deadline := time.Now().Add(5 * time.Second)
-	for len(receivedOrder) < 50 && time.Now().Before(deadline) {
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		count := len(receivedOrder)
+		mu.Unlock()
+		if count >= 50 {
+			break
+		}
 		time.Sleep(50 * time.Millisecond)
 	}
 

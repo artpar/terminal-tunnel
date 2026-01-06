@@ -242,8 +242,9 @@ func (ec *EncryptedChannel) UseAltKey() bool {
 func (ec *EncryptedChannel) StartKeepalive() <-chan struct{} {
 	ec.mu.Lock()
 	if ec.pingTicker != nil {
+		result := ec.pongCheckDone // Capture before releasing lock to avoid race
 		ec.mu.Unlock()
-		return ec.pongCheckDone
+		return result
 	}
 
 	ticker := time.NewTicker(PingInterval)
