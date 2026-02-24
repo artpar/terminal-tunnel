@@ -29,19 +29,22 @@ P2P terminal sharing with end-to-end encryption. Share your terminal from anywhe
 ## Install
 
 ### One-liner (macOS/Linux)
+You can `curl` the 
+[latest release](https://github.com/artpar/terminal-tunnel/releases/), 
+extract it, and then move the binary to somewhere in your `$PATH` to execute it.
 
 ```bash
 # macOS (Apple Silicon)
-curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-arm64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
+curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_darwin_arm64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
 
 # macOS (Intel)
-curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-darwin-amd64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
+curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_darwin_amd64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
 
 # Linux (x64)
-curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-linux-amd64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
+curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_linux_amd64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
 
 # Linux (ARM64)
-curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt-linux-arm64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
+curl -L https://github.com/artpar/terminal-tunnel/releases/latest/download/tt_linux_arm64.tar.gz | tar xz && sudo mv tt /usr/local/bin/
 ```
 
 ### Package Managers
